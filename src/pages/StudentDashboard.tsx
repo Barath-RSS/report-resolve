@@ -66,7 +66,6 @@ export default function StudentDashboard() {
   const [loadingReports, setLoadingReports] = useState(true);
   const [showMyReports, setShowMyReports] = useState(false);
   
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);

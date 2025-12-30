@@ -75,11 +75,12 @@ const Index = () => {
             with automatic location tracking and photo evidence.
           </motion.p>
 
-          {/* CTA Button */}
+          {/* CTA Buttons */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5 }}
+            className="flex flex-col sm:flex-row items-center justify-center gap-4"
           >
             <Link to="/auth">
               <AnimatedButton
@@ -88,6 +89,15 @@ const Index = () => {
               >
                 Get Started
                 <ArrowRight className="w-5 h-5 ml-2" />
+              </AnimatedButton>
+            </Link>
+            <Link to="/admin">
+              <AnimatedButton
+                size="lg"
+                variant="outline"
+                className="px-8 h-14 text-lg"
+              >
+                Admin Panel
               </AnimatedButton>
             </Link>
           </motion.div>
