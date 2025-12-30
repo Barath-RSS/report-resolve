@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LayoutDashboard, FileText, CheckCircle2, Clock, 
-  Search, Filter, MapPin, ExternalLink, X,
+  Search, Filter, MapPin, ExternalLink, Bell,
   ChevronRight, AlertCircle, Loader2, Send, Eye
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
@@ -17,6 +17,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -36,6 +37,13 @@ interface Report {
   official_response: string | null;
 }
 
+interface Notification {
+  id: string;
+  report: Report;
+  read: boolean;
+  timestamp: Date;
+}
+
 export default function CommandCenter() {
   const [reports, setReports] = useState<Report[]>([]);
   const [filteredReports, setFilteredReports] = useState<Report[]>([]);
@@ -47,12 +55,53 @@ export default function CommandCenter() {
   const [newStatus, setNewStatus] = useState('');
   const [officialResponse, setOfficialResponse] = useState('');
   const [updating, setUpdating] = useState(false);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [notificationOpen, setNotificationOpen] = useState(false);
 
   const { signOut } = useAuth();
   const { toast } = useToast();
 
   useEffect(() => {
     fetchReports();
+
+    // Subscribe to real-time updates for new reports
+    const channel = supabase
+      .channel('reports-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'reports'
+        },
+        (payload) => {
+          const newReport = payload.new as Report;
+          console.log('New report received:', newReport);
+          
+          // Add to reports list
+          setReports(prev => [newReport, ...prev]);
+          
+          // Add notification
+          const notification: Notification = {
+            id: newReport.id,
+            report: newReport,
+            read: false,
+            timestamp: new Date()
+          };
+          setNotifications(prev => [notification, ...prev]);
+          
+          // Show toast notification
+          toast({
+            title: '🚨 New Report Submitted',
+            description: `${newReport.sub_category.replace('_', ' ')} - ${newReport.description.substring(0, 50)}...`,
+          });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {
@@ -76,6 +125,16 @@ export default function CommandCenter() {
       setReports(data || []);
     }
     setLoading(false);
+  };
+
+  const unreadCount = notifications.filter(n => !n.read).length;
+
+  const markAllAsRead = () => {
+    setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
+
+  const clearNotifications = () => {
+    setNotifications([]);
   };
 
   const filterReports = () => {
@@ -183,6 +242,90 @@ export default function CommandCenter() {
             <h1 className="text-xl font-bold text-foreground">Command Center</h1>
           </div>
           <div className="flex items-center gap-3">
+            {/* Notifications */}
+            <Popover open={notificationOpen} onOpenChange={setNotificationOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="ghost" size="icon" className="relative">
+                  <Bell className="w-5 h-5" />
+                  {unreadCount > 0 && (
+                    <motion.span
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-destructive text-destructive-foreground text-xs flex items-center justify-center"
+                    >
+                      {unreadCount > 9 ? '9+' : unreadCount}
+                    </motion.span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80 p-0" align="end">
+                <div className="p-4 border-b border-border flex items-center justify-between">
+                  <h3 className="font-semibold text-foreground">Notifications</h3>
+                  <div className="flex gap-2">
+                    {notifications.length > 0 && (
+                      <>
+                        <Button variant="ghost" size="sm" onClick={markAllAsRead}>
+                          Mark all read
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={clearNotifications}>
+                          Clear
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <div className="max-h-80 overflow-y-auto">
+                  {notifications.length === 0 ? (
+                    <div className="p-8 text-center">
+                      <Bell className="w-10 h-10 mx-auto text-muted-foreground mb-2" />
+                      <p className="text-sm text-muted-foreground">No notifications yet</p>
+                    </div>
+                  ) : (
+                    notifications.map((notification) => (
+                      <motion.div
+                        key={notification.id}
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className={`p-4 border-b border-border hover:bg-muted/50 cursor-pointer transition-colors ${
+                          !notification.read ? 'bg-primary/5' : ''
+                        }`}
+                        onClick={() => {
+                          setSelectedReport(notification.report);
+                          setNewStatus(notification.report.status);
+                          setOfficialResponse(notification.report.official_response || '');
+                          setNotifications(prev =>
+                            prev.map(n =>
+                              n.id === notification.id ? { ...n, read: true } : n
+                            )
+                          );
+                          setNotificationOpen(false);
+                        }}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-full bg-warning/10 flex items-center justify-center flex-shrink-0">
+                            <AlertCircle className="w-4 h-4 text-warning" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-foreground capitalize">
+                              {notification.report.sub_category.replace('_', ' ')}
+                            </p>
+                            <p className="text-xs text-muted-foreground truncate">
+                              {notification.report.description}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {notification.timestamp.toLocaleTimeString()}
+                            </p>
+                          </div>
+                          {!notification.read && (
+                            <div className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />
+                          )}
+                        </div>
+                      </motion.div>
+                    ))
+                  )}
+                </div>
+              </PopoverContent>
+            </Popover>
             <ThemeToggle />
             <Button variant="outline" size="sm" onClick={signOut}>
               Sign Out
