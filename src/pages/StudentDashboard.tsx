@@ -60,19 +60,31 @@ export default function StudentDashboard() {
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [capturingPhoto, setCapturingPhoto] = useState(false);
   const [loading, setLoading] = useState(false);
   const [reports, setReports] = useState<Report[]>([]);
   const [loadingReports, setLoadingReports] = useState(true);
   const [showMyReports, setShowMyReports] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const { user, signOut } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
   useEffect(() => {
     fetchReports();
-    getLocation();
+  }, []);
+
+  // Cleanup camera on unmount
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
   }, []);
 
   const fetchReports = async () => {
@@ -92,32 +104,88 @@ export default function StudentDashboard() {
     setLoadingReports(false);
   };
 
-  const getLocation = () => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          setLocation({
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
-          });
-        },
-        (error) => {
-          console.error('Error getting location:', error);
-        }
-      );
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+        audio: false,
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setCapturingPhoto(true);
+    } catch (error) {
+      console.error('Error accessing camera:', error);
+      toast({
+        title: 'Camera Error',
+        description: 'Could not access camera. Please check permissions.',
+        variant: 'destructive',
+      });
     }
   };
 
-  const handleImageCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setImageFile(file);
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        setImagePreview(e.target?.result as string);
-      };
-      reader.readAsDataURL(file);
+  const capturePhoto = () => {
+    if (!videoRef.current || !canvasRef.current) return;
+
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(video, 0, 0);
+      
+      // Get image as blob
+      canvas.toBlob((blob) => {
+        if (blob) {
+          const file = new File([blob], `capture-${Date.now()}.jpg`, { type: 'image/jpeg' });
+          setImageFile(file);
+          setImagePreview(canvas.toDataURL('image/jpeg'));
+          
+          // Capture GPS coordinates at the moment of photo capture
+          if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+              (position) => {
+                setLocation({
+                  lat: position.coords.latitude,
+                  lng: position.coords.longitude,
+                });
+                toast({
+                  title: 'Photo Captured',
+                  description: 'Location coordinates recorded.',
+                });
+              },
+              (error) => {
+                console.error('Error getting location:', error);
+                toast({
+                  title: 'Photo Captured',
+                  description: 'Could not get location. Please enable GPS.',
+                  variant: 'destructive',
+                });
+              },
+              { enableHighAccuracy: true }
+            );
+          }
+        }
+      }, 'image/jpeg', 0.9);
     }
+
+    // Stop the camera
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setCapturingPhoto(false);
+  };
+
+  const cancelCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setCapturingPhoto(false);
   };
 
   const uploadImage = async (file: File): Promise<string | null> => {
@@ -508,16 +576,35 @@ export default function StudentDashboard() {
               {/* Photo Capture */}
               <div className="space-y-3">
                 <Label>Photo Evidence</Label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  onChange={handleImageCapture}
-                  className="hidden"
-                />
+                <canvas ref={canvasRef} className="hidden" />
                 
-                {imagePreview ? (
+                {capturingPhoto ? (
+                  <div className="relative rounded-xl overflow-hidden border border-border">
+                    <video
+                      ref={videoRef}
+                      autoPlay
+                      playsInline
+                      muted
+                      className="w-full h-64 object-cover"
+                    />
+                    <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-2">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={cancelCamera}
+                      >
+                        Cancel
+                      </Button>
+                      <AnimatedButton
+                        onClick={capturePhoto}
+                        className="gradient-primary text-primary-foreground"
+                      >
+                        <Camera className="w-4 h-4 mr-2" />
+                        Capture
+                      </AnimatedButton>
+                    </div>
+                  </div>
+                ) : imagePreview ? (
                   <div className="relative rounded-xl overflow-hidden border border-border">
                     <img
                       src={imagePreview}
@@ -528,7 +615,12 @@ export default function StudentDashboard() {
                       variant="secondary"
                       size="sm"
                       className="absolute bottom-3 right-3"
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={() => {
+                        setImageFile(null);
+                        setImagePreview(null);
+                        setLocation(null);
+                        startCamera();
+                      }}
                     >
                       <Camera className="w-4 h-4 mr-2" />
                       Retake
@@ -537,12 +629,12 @@ export default function StudentDashboard() {
                 ) : (
                   <motion.button
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={startCamera}
                     className="w-full h-40 rounded-xl border-2 border-dashed border-border hover:border-primary/50 transition-colors flex flex-col items-center justify-center gap-3"
                   >
                     <Camera className="w-10 h-10 text-muted-foreground" />
                     <span className="text-sm text-muted-foreground">
-                      Tap to capture photo
+                      Tap to open camera
                     </span>
                   </motion.button>
                 )}
