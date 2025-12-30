@@ -2,13 +2,14 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { z } from 'zod';
-import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User } from 'lucide-react';
+import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User, Users } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { AnimatedButton } from '@/components/AnimatedButton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { PageTransition } from '@/components/ui/PageTransition';
 
@@ -16,12 +17,15 @@ const emailSchema = z.string().email('Invalid email format').max(255);
 const passwordSchema = z.string().min(6, 'Password must be at least 6 characters').max(128);
 const nameSchema = z.string().min(2, 'Name must be at least 2 characters').max(100);
 
+type SelectedRole = 'student' | 'official';
+
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
+  const [selectedRole, setSelectedRole] = useState<SelectedRole>('student');
   const [showPassword, setShowPassword] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -34,13 +38,22 @@ export default function AuthPage() {
 
   useEffect(() => {
     if (!authLoading && user && role) {
+      // Check if logged-in user's role matches the selected role
+      if (role !== selectedRole) {
+        toast({
+          title: 'Access Denied',
+          description: `You don't have ${selectedRole === 'official' ? 'Official' : 'Student'} access. Redirecting to your dashboard.`,
+          variant: 'destructive',
+        });
+      }
+      // Redirect based on actual role
       if (role === 'official') {
         navigate('/command-center');
       } else {
         navigate('/dashboard');
       }
     }
-  }, [user, role, authLoading, navigate]);
+  }, [user, role, authLoading, navigate, selectedRole, toast]);
 
   const detectCapsLock = (e: React.KeyboardEvent) => {
     setCapsLock(e.getModifierState('CapsLock'));
@@ -91,9 +104,10 @@ export default function AuthPage() {
       } else if (isLogin) {
         const { error } = await signIn(email, password);
         if (error) throw error;
+        // Role validation happens in useEffect after auth state updates
         toast({
-          title: 'Welcome back!',
-          description: 'You have successfully signed in.',
+          title: 'Signing in...',
+          description: 'Verifying your credentials.',
         });
       } else {
         const { error } = await signUp(email, password, fullName);
@@ -150,6 +164,24 @@ export default function AuthPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
+            {/* Role Selection (Login only) */}
+            {isLogin && !isForgotPassword && (
+              <div className="space-y-2">
+                <Label htmlFor="role">Login As</Label>
+                <div className="relative">
+                  <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+                  <Select value={selectedRole} onValueChange={(value: SelectedRole) => setSelectedRole(value)}>
+                    <SelectTrigger className="pl-10">
+                      <SelectValue placeholder="Select your role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="student">Student</SelectItem>
+                      <SelectItem value="official">Official (Admin)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
             {/* Full Name (Sign Up only) */}
             {!isLogin && !isForgotPassword && (
               <motion.div
