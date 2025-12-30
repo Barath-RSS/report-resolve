@@ -1,17 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { z } from 'zod';
-import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User, Users } from 'lucide-react';
+import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User, Users, LayoutDashboard, Command, FileText } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
 import { AnimatedButton } from '@/components/AnimatedButton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { PageTransition } from '@/components/ui/PageTransition';
+import { supabase } from '@/integrations/supabase/client';
 
 const emailSchema = z.string().email('Invalid email format').max(255);
 const passwordSchema = z.string().min(6, 'Password must be at least 6 characters').max(128);
@@ -26,6 +29,8 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [selectedRole, setSelectedRole] = useState<SelectedRole>('student');
+  const [requestOfficialAccess, setRequestOfficialAccess] = useState(false);
+  const [accessRequestReason, setAccessRequestReason] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -110,11 +115,31 @@ export default function AuthPage() {
           description: 'Verifying your credentials.',
         });
       } else {
-        const { error } = await signUp(email, password, fullName);
+        const { error, data } = await signUp(email, password, fullName);
         if (error) throw error;
+        
+        // If user requested official access, create an access request
+        if (requestOfficialAccess && data?.user) {
+          const { error: requestError } = await supabase
+            .from('access_requests')
+            .insert({
+              user_id: data.user.id,
+              full_name: fullName,
+              email: email,
+              reason: accessRequestReason || null,
+              status: 'pending'
+            });
+          
+          if (requestError) {
+            console.error('Error creating access request:', requestError);
+          }
+        }
+        
         toast({
           title: 'Account created!',
-          description: 'Welcome to the Incident Reporting System.',
+          description: requestOfficialAccess 
+            ? 'Your official access request has been submitted for review.'
+            : 'Welcome to the Incident Reporting System.',
         });
       }
     } catch (error: any) {
@@ -164,22 +189,57 @@ export default function AuthPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Role Selection (Login only) */}
+            {/* Role Selection with Dashboard Indicator (Login only) */}
             {isLogin && !isForgotPassword && (
-              <div className="space-y-2">
-                <Label htmlFor="role">Login As</Label>
-                <div className="relative">
-                  <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-                  <Select value={selectedRole} onValueChange={(value: SelectedRole) => setSelectedRole(value)}>
-                    <SelectTrigger className="pl-10">
-                      <SelectValue placeholder="Select your role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="student">Student</SelectItem>
-                      <SelectItem value="official">Official (Admin)</SelectItem>
-                    </SelectContent>
-                  </Select>
+              <div className="space-y-3">
+                <div className="space-y-2">
+                  <Label htmlFor="role">Login As</Label>
+                  <div className="relative">
+                    <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
+                    <Select value={selectedRole} onValueChange={(value: SelectedRole) => setSelectedRole(value)}>
+                      <SelectTrigger className="pl-10">
+                        <SelectValue placeholder="Select your role" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="student">Student</SelectItem>
+                        <SelectItem value="official">Official (Admin)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
+                
+                {/* Dashboard Indicator */}
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={selectedRole}
+                    initial={{ opacity: 0, y: -10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 10 }}
+                    className={`flex items-center gap-3 p-3 rounded-lg border ${
+                      selectedRole === 'official' 
+                        ? 'bg-primary/10 border-primary/30' 
+                        : 'bg-muted/50 border-border'
+                    }`}
+                  >
+                    {selectedRole === 'official' ? (
+                      <>
+                        <Command className="w-5 h-5 text-primary" />
+                        <div>
+                          <p className="text-sm font-medium text-foreground">Command Center</p>
+                          <p className="text-xs text-muted-foreground">View and manage all incident reports</p>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <LayoutDashboard className="w-5 h-5 text-muted-foreground" />
+                        <div>
+                          <p className="text-sm font-medium text-foreground">Student Dashboard</p>
+                          <p className="text-xs text-muted-foreground">Submit and track your reports</p>
+                        </div>
+                      </>
+                    )}
+                  </motion.div>
+                </AnimatePresence>
               </div>
             )}
             {/* Full Name (Sign Up only) */}
@@ -204,6 +264,54 @@ export default function AuthPage() {
                 </div>
                 {errors.fullName && (
                   <p className="text-sm text-destructive">{errors.fullName}</p>
+                )}
+              </motion.div>
+            )}
+
+            {/* Official Access Request (Sign Up only) */}
+            {!isLogin && !isForgotPassword && (
+              <motion.div
+                initial={{ opacity: 0, height: 0 }}
+                animate={{ opacity: 1, height: 'auto' }}
+                exit={{ opacity: 0, height: 0 }}
+                className="space-y-3"
+              >
+                <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/30">
+                  <Checkbox 
+                    id="requestOfficial" 
+                    checked={requestOfficialAccess}
+                    onCheckedChange={(checked) => setRequestOfficialAccess(checked === true)}
+                  />
+                  <div className="space-y-1">
+                    <Label htmlFor="requestOfficial" className="text-sm font-medium cursor-pointer">
+                      Request Official/Admin Access
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Submit a request for official access to manage incident reports
+                    </p>
+                  </div>
+                </div>
+                
+                {requestOfficialAccess && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="space-y-2"
+                  >
+                    <Label htmlFor="reason">Reason for Request (Optional)</Label>
+                    <div className="relative">
+                      <FileText className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Textarea
+                        id="reason"
+                        placeholder="Why do you need official access?"
+                        value={accessRequestReason}
+                        onChange={(e) => setAccessRequestReason(e.target.value)}
+                        className="pl-10 min-h-[80px]"
+                        maxLength={500}
+                      />
+                    </div>
+                  </motion.div>
                 )}
               </motion.div>
             )}
