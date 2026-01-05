@@ -105,17 +105,27 @@ export default function StudentDashboard() {
 
   const startCamera = async () => {
     try {
+      setCapturingPhoto(true);
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+        video: { 
+          facingMode: 'environment',
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
         audio: false,
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      setCapturingPhoto(true);
+      
+      // Wait for next tick to ensure video element is rendered
+      setTimeout(() => {
+        if (videoRef.current && streamRef.current) {
+          videoRef.current.srcObject = streamRef.current;
+          videoRef.current.play().catch(console.error);
+        }
+      }, 100);
     } catch (error) {
       console.error('Error accessing camera:', error);
+      setCapturingPhoto(false);
       toast({
         title: 'Camera Error',
         description: 'Could not access camera. Please check permissions.',
@@ -124,17 +134,34 @@ export default function StudentDashboard() {
     }
   };
 
-  const capturePhoto = () => {
-    if (!videoRef.current || !canvasRef.current) return;
+  const capturePhoto = async () => {
+    if (!videoRef.current || !canvasRef.current) {
+      toast({
+        title: 'Error',
+        description: 'Camera not ready. Please try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
 
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    
+    // Check if video is ready
+    if (video.readyState < 2) {
+      toast({
+        title: 'Please wait',
+        description: 'Camera is still loading...',
+      });
+      return;
+    }
+    
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
     
     const ctx = canvas.getContext('2d');
     if (ctx) {
-      ctx.drawImage(video, 0, 0);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       
       // Get image as blob
       canvas.toBlob((blob) => {
@@ -143,8 +170,20 @@ export default function StudentDashboard() {
           setImageFile(file);
           setImagePreview(canvas.toDataURL('image/jpeg'));
           
+          // Stop the camera first
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(track => track.stop());
+            streamRef.current = null;
+          }
+          setCapturingPhoto(false);
+          
           // Capture GPS coordinates at the moment of photo capture
           if (navigator.geolocation) {
+            toast({
+              title: 'Photo Captured',
+              description: 'Getting your location...',
+            });
+            
             navigator.geolocation.getCurrentPosition(
               (position) => {
                 setLocation({
@@ -152,31 +191,42 @@ export default function StudentDashboard() {
                   lng: position.coords.longitude,
                 });
                 toast({
-                  title: 'Photo Captured',
-                  description: 'Location coordinates recorded.',
+                  title: 'Location Captured',
+                  description: `Coordinates: ${position.coords.latitude.toFixed(4)}, ${position.coords.longitude.toFixed(4)}`,
                 });
               },
               (error) => {
                 console.error('Error getting location:', error);
+                let errorMessage = 'Could not get location.';
+                if (error.code === 1) {
+                  errorMessage = 'Location permission denied. Please enable GPS in your browser settings.';
+                } else if (error.code === 2) {
+                  errorMessage = 'Location unavailable. Please check your device settings.';
+                } else if (error.code === 3) {
+                  errorMessage = 'Location request timed out. Please try again.';
+                }
                 toast({
-                  title: 'Photo Captured',
-                  description: 'Could not get location. Please enable GPS.',
+                  title: 'Location Error',
+                  description: errorMessage,
                   variant: 'destructive',
                 });
               },
-              { enableHighAccuracy: true }
+              { 
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+              }
             );
+          } else {
+            toast({
+              title: 'Photo Captured',
+              description: 'Geolocation is not supported by this browser.',
+              variant: 'destructive',
+            });
           }
         }
       }, 'image/jpeg', 0.9);
     }
-
-    // Stop the camera
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    setCapturingPhoto(false);
   };
 
   const cancelCamera = () => {
@@ -301,26 +351,31 @@ export default function StudentDashboard() {
   return (
     <PageTransition className="min-h-screen bg-background">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
+      <header className="sticky top-0 z-50 border-b border-border bg-card shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
-          <h1 className="text-xl font-bold text-foreground">Incident Reporter</h1>
           <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg gradient-primary flex items-center justify-center">
+              <FileText className="w-5 h-5 text-primary-foreground" />
+            </div>
+            <h1 className="text-lg font-bold text-foreground">Incident Reporter</h1>
+          </div>
+          <div className="flex items-center gap-2">
             <Button
-              variant="ghost"
+              variant={showMyReports ? "default" : "ghost"}
               size="sm"
               onClick={() => setShowMyReports(!showMyReports)}
               className="relative"
             >
-              <FileText className="w-4 h-4 mr-2" />
-              My Reports
+              <FileText className="w-4 h-4 mr-1.5" />
+              <span className="hidden sm:inline">My Reports</span>
               {reports.length > 0 && (
-                <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center">
+                <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-primary-foreground text-primary text-xs font-medium">
                   {reports.length}
                 </span>
               )}
             </Button>
             <ThemeToggle />
-            <Button variant="outline" size="sm" onClick={signOut}>
+            <Button variant="outline" size="sm" onClick={signOut} className="hidden sm:flex">
               Sign Out
             </Button>
           </div>
