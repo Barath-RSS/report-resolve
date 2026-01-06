@@ -22,6 +22,8 @@ import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { useNavigate } from 'react-router-dom';
 
+import { Building2 } from 'lucide-react';
+
 const categories = {
   infrastructure: [
     { id: 'drainage', label: 'Drainage', icon: Droplets },
@@ -29,6 +31,7 @@ const categories = {
     { id: 'trash', label: 'Trash', icon: Trash2 },
     { id: 'electrical', label: 'Electrical', icon: Zap },
     { id: 'water', label: 'Water', icon: Droplet },
+    { id: 'classroom', label: 'Classroom', icon: Building2 },
   ],
   personal: [
     { id: 'harassment', label: 'Harassment', icon: Users },
@@ -59,7 +62,7 @@ export default function StudentDashboard() {
   const [timeOfIncident, setTimeOfIncident] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [landmark, setLandmark] = useState('');
   const [capturingPhoto, setCapturingPhoto] = useState(false);
   const [loading, setLoading] = useState(false);
   const [reports, setReports] = useState<Report[]>([]);
@@ -170,60 +173,17 @@ export default function StudentDashboard() {
           setImageFile(file);
           setImagePreview(canvas.toDataURL('image/jpeg'));
           
-          // Stop the camera first
+          // Stop the camera
           if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
           }
           setCapturingPhoto(false);
           
-          // Capture GPS coordinates at the moment of photo capture
-          if (navigator.geolocation) {
-            toast({
-              title: 'Photo Captured',
-              description: 'Getting your location...',
-            });
-            
-            navigator.geolocation.getCurrentPosition(
-              (position) => {
-                setLocation({
-                  lat: position.coords.latitude,
-                  lng: position.coords.longitude,
-                });
-                toast({
-                  title: 'Location Captured',
-                  description: `Coordinates: ${position.coords.latitude.toFixed(4)}, ${position.coords.longitude.toFixed(4)}`,
-                });
-              },
-              (error) => {
-                console.error('Error getting location:', error);
-                let errorMessage = 'Could not get location.';
-                if (error.code === 1) {
-                  errorMessage = 'Location permission denied. Please enable GPS in your browser settings.';
-                } else if (error.code === 2) {
-                  errorMessage = 'Location unavailable. Please check your device settings.';
-                } else if (error.code === 3) {
-                  errorMessage = 'Location request timed out. Please try again.';
-                }
-                toast({
-                  title: 'Location Error',
-                  description: errorMessage,
-                  variant: 'destructive',
-                });
-              },
-              { 
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 0
-              }
-            );
-          } else {
-            toast({
-              title: 'Photo Captured',
-              description: 'Geolocation is not supported by this browser.',
-              variant: 'destructive',
-            });
-          }
+          toast({
+            title: 'Photo Captured',
+            description: 'Please enter the landmark/location details below.',
+          });
         }
       }, 'image/jpeg', 0.9);
     }
@@ -477,15 +437,15 @@ export default function StudentDashboard() {
 
               {/* Category Tabs */}
               <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-3 h-12">
-                  <TabsTrigger value="infrastructure" className="text-sm">
-                    Public Infrastructure
+                <TabsList className="grid w-full grid-cols-3 h-auto min-h-[3rem] p-1">
+                  <TabsTrigger value="infrastructure" className="text-xs sm:text-sm px-2 py-2 leading-tight">
+                    <span className="hidden sm:inline">Public </span>Infrastructure
                   </TabsTrigger>
-                  <TabsTrigger value="personal" className="text-sm">
-                    Personal Issues
+                  <TabsTrigger value="personal" className="text-xs sm:text-sm px-2 py-2 leading-tight">
+                    Personal<span className="hidden sm:inline"> Issues</span>
                   </TabsTrigger>
-                  <TabsTrigger value="security" className="text-sm">
-                    Theft & Security
+                  <TabsTrigger value="security" className="text-xs sm:text-sm px-2 py-2 leading-tight">
+                    <span className="hidden sm:inline">Theft &</span> Security
                   </TabsTrigger>
                 </TabsList>
 
