@@ -31,6 +31,7 @@ interface Report {
   image_url: string | null;
   lat: number | null;
   lng: number | null;
+  landmark: string | null;
   status: string;
   is_anonymous: boolean;
   time_of_incident: string | null;
@@ -583,10 +584,21 @@ export default function CommandCenter() {
                 </div>
               )}
 
-              {/* Location */}
+              {/* Location / Landmark */}
+              {selectedReport.landmark && (
+                <div>
+                  <Label className="text-muted-foreground">Location / Landmark</Label>
+                  <div className="mt-2 p-3 rounded-lg bg-muted/50 flex items-start gap-2">
+                    <MapPin className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                    <p className="text-foreground">{selectedReport.landmark}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Legacy GPS Location (for old reports) */}
               {selectedReport.lat && selectedReport.lng && (
                 <div>
-                  <Label className="text-muted-foreground">Location</Label>
+                  <Label className="text-muted-foreground">GPS Coordinates</Label>
                   <Button
                     variant="outline"
                     className="mt-2 w-full"

@@ -250,8 +250,7 @@ export default function StudentDashboard() {
         sub_category: selectedCategory,
         description: description.trim(),
         image_url: imageUrl,
-        lat: location?.lat,
-        lng: location?.lng,
+        landmark: landmark.trim() || null,
         is_anonymous: activeTab === 'personal' ? isAnonymous : false,
         time_of_incident: activeTab === 'security' && timeOfIncident ? new Date(timeOfIncident).toISOString() : null,
         status: 'pending',
@@ -270,6 +269,7 @@ export default function StudentDashboard() {
       setImageFile(null);
       setImagePreview(null);
       setTimeOfIncident('');
+      setLandmark('');
       fetchReports();
     } catch (error: any) {
       toast({
@@ -632,7 +632,7 @@ export default function StudentDashboard() {
                       onClick={() => {
                         setImageFile(null);
                         setImagePreview(null);
-                        setLocation(null);
+                        setLandmark('');
                         startCamera();
                       }}
                     >
@@ -654,14 +654,23 @@ export default function StudentDashboard() {
                 )}
               </div>
 
-              {/* Location Status */}
-              <div className="flex items-center gap-2 p-3 rounded-lg bg-muted/50">
-                <MapPin className={`w-4 h-4 ${location ? 'text-success' : 'text-muted-foreground'}`} />
-                <span className="text-sm text-muted-foreground">
-                  {location
-                    ? `Location captured: ${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`
-                    : 'Waiting for location...'}
-                </span>
+              {/* Landmark Input */}
+              <div className="space-y-2">
+                <Label htmlFor="landmark">Location / Landmark</Label>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="landmark"
+                    type="text"
+                    placeholder="e.g., Block A, Room 302, Near Main Library..."
+                    value={landmark}
+                    onChange={(e) => setLandmark(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Enter the specific location or nearest landmark where the issue occurred
+                </p>
               </div>
 
               {/* Submit Button */}

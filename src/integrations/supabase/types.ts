@@ -91,6 +91,7 @@ export type Database = {
           id: string
           image_url: string | null
           is_anonymous: boolean
+          landmark: string | null
           lat: number | null
           lng: number | null
           official_response: string | null
@@ -107,6 +108,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_anonymous?: boolean
+          landmark?: string | null
           lat?: number | null
           lng?: number | null
           official_response?: string | null
@@ -123,6 +125,7 @@ export type Database = {
           id?: string
           image_url?: string | null
           is_anonymous?: boolean
+          landmark?: string | null
           lat?: number | null
           lng?: number | null
           official_response?: string | null
