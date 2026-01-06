@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { z } from 'zod';
-import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User, Users, LayoutDashboard, Command, FileText } from 'lucide-react';
+import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User, Users, LayoutDashboard, Command, FileText, Hash } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -15,10 +15,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/hooks/use-toast';
 import { PageTransition } from '@/components/ui/PageTransition';
 import { supabase } from '@/integrations/supabase/client';
+import collegeLogo from '@/assets/college-logo.jpg';
 
 const emailSchema = z.string().email('Invalid email format').max(255);
 const passwordSchema = z.string().min(6, 'Password must be at least 6 characters').max(128);
 const nameSchema = z.string().min(2, 'Name must be at least 2 characters').max(100);
+const registerNoSchema = z.string().min(5, 'Register No must be at least 5 characters').max(20);
 
 type SelectedRole = 'student' | 'official';
 
@@ -26,6 +28,7 @@ export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
   const [email, setEmail] = useState('');
+  const [registerNo, setRegisterNo] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [selectedRole, setSelectedRole] = useState<SelectedRole>('student');
@@ -34,7 +37,7 @@ export default function AuthPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [errors, setErrors] = useState<{ email?: string; password?: string; fullName?: string }>({});
+  const [errors, setErrors] = useState<{ email?: string; password?: string; fullName?: string; registerNo?: string }>({});
 
   const { signIn, signUp, resetPassword, user, role, loading: authLoading } = useAuth();
   const { theme } = useTheme();
@@ -43,7 +46,6 @@ export default function AuthPage() {
 
   useEffect(() => {
     if (!authLoading && user && role) {
-      // Check if logged-in user's role matches the selected role
       if (role !== selectedRole) {
         toast({
           title: 'Access Denied',
@@ -51,7 +53,6 @@ export default function AuthPage() {
           variant: 'destructive',
         });
       }
-      // Redirect based on actual role
       if (role === 'official') {
         navigate('/command-center');
       } else {
@@ -67,22 +68,38 @@ export default function AuthPage() {
   const validateForm = () => {
     const newErrors: typeof errors = {};
     
-    const emailResult = emailSchema.safeParse(email);
-    if (!emailResult.success) {
-      newErrors.email = emailResult.error.errors[0].message;
-    }
-    
-    if (!isForgotPassword) {
+    if (isForgotPassword) {
+      const emailResult = emailSchema.safeParse(email);
+      if (!emailResult.success) {
+        newErrors.email = emailResult.error.errors[0].message;
+      }
+    } else if (isLogin) {
+      // Login uses register no
+      const registerNoResult = registerNoSchema.safeParse(registerNo);
+      if (!registerNoResult.success) {
+        newErrors.registerNo = registerNoResult.error.errors[0].message;
+      }
       const passwordResult = passwordSchema.safeParse(password);
       if (!passwordResult.success) {
         newErrors.password = passwordResult.error.errors[0].message;
       }
-    }
-    
-    if (!isLogin && !isForgotPassword) {
+    } else {
+      // Sign up requires all fields
+      const emailResult = emailSchema.safeParse(email);
+      if (!emailResult.success) {
+        newErrors.email = emailResult.error.errors[0].message;
+      }
+      const passwordResult = passwordSchema.safeParse(password);
+      if (!passwordResult.success) {
+        newErrors.password = passwordResult.error.errors[0].message;
+      }
       const nameResult = nameSchema.safeParse(fullName);
       if (!nameResult.success) {
         newErrors.fullName = nameResult.error.errors[0].message;
+      }
+      const registerNoResult = registerNoSchema.safeParse(registerNo);
+      if (!registerNoResult.success) {
+        newErrors.registerNo = registerNoResult.error.errors[0].message;
       }
     }
     
@@ -107,18 +124,27 @@ export default function AuthPage() {
         });
         setIsForgotPassword(false);
       } else if (isLogin) {
-        const { error } = await signIn(email, password);
+        // Find email by register no first
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('email')
+          .eq('register_no', registerNo.trim().toUpperCase())
+          .maybeSingle();
+        
+        if (profileError || !profileData?.email) {
+          throw new Error('Register number not found. Please check and try again.');
+        }
+        
+        const { error } = await signIn(profileData.email, password);
         if (error) throw error;
-        // Role validation happens in useEffect after auth state updates
         toast({
           title: 'Signing in...',
           description: 'Verifying your credentials.',
         });
       } else {
-        const { error, data } = await signUp(email, password, fullName);
+        const { error, data } = await signUp(email, password, fullName, registerNo.trim().toUpperCase());
         if (error) throw error;
         
-        // If user requested official access, create an access request
         if (requestOfficialAccess && data?.user) {
           const { error: requestError } = await supabase
             .from('access_requests')
@@ -139,7 +165,7 @@ export default function AuthPage() {
           title: 'Account created!',
           description: requestOfficialAccess 
             ? 'Your official access request has been submitted for review.'
-            : 'Welcome to the Incident Reporting System.',
+            : 'Welcome to the Campus Issue Reporting System.',
         });
       }
     } catch (error: any) {
@@ -172,23 +198,27 @@ export default function AuthPage() {
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ type: 'spring', stiffness: 200, delay: 0.1 }}
-              className="inline-flex items-center justify-center w-16 h-16 rounded-2xl gradient-primary mb-4"
+              className="inline-flex items-center justify-center w-20 h-20 rounded-full overflow-hidden border-2 border-primary/20 mb-4 shadow-lg"
             >
-              <Shield className="w-8 h-8 text-primary-foreground" />
+              <img 
+                src={collegeLogo} 
+                alt="Sathyabama Logo" 
+                className="w-full h-full object-contain bg-white p-1"
+              />
             </motion.div>
-            <h1 className="text-2xl font-bold text-foreground">
+            <h1 className="text-xl font-bold text-foreground">
               {isForgotPassword ? 'Reset Password' : isLogin ? 'Welcome Back' : 'Create Account'}
             </h1>
-            <p className="text-muted-foreground mt-2">
+            <p className="text-sm text-muted-foreground mt-1">
               {isForgotPassword
                 ? 'Enter your email to receive a reset link'
                 : isLogin
-                ? 'Sign in to your account'
-                : 'Register for incident reporting'}
+                ? 'Sign in with your Register No'
+                : 'Register for campus issue reporting'}
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-4">
             {/* Role Selection with Dashboard Indicator (Login only) */}
             {isLogin && !isForgotPassword && (
               <div className="space-y-3">
@@ -226,7 +256,7 @@ export default function AuthPage() {
                         <Command className="w-5 h-5 text-primary" />
                         <div>
                           <p className="text-sm font-medium text-foreground">Command Center</p>
-                          <p className="text-xs text-muted-foreground">View and manage all incident reports</p>
+                          <p className="text-xs text-muted-foreground">Manage all incident reports</p>
                         </div>
                       </>
                     ) : (
@@ -234,7 +264,7 @@ export default function AuthPage() {
                         <LayoutDashboard className="w-5 h-5 text-muted-foreground" />
                         <div>
                           <p className="text-sm font-medium text-foreground">Student Dashboard</p>
-                          <p className="text-xs text-muted-foreground">Submit and track your reports</p>
+                          <p className="text-xs text-muted-foreground">Submit and track reports</p>
                         </div>
                       </>
                     )}
@@ -242,6 +272,7 @@ export default function AuthPage() {
                 </AnimatePresence>
               </div>
             )}
+
             {/* Full Name (Sign Up only) */}
             {!isLogin && !isForgotPassword && (
               <motion.div
@@ -268,6 +299,48 @@ export default function AuthPage() {
               </motion.div>
             )}
 
+            {/* Email (Sign Up and Forgot Password only) */}
+            {(!isLogin || isForgotPassword) && (
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="name@sathyabama.ac.in"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="pl-10"
+                  />
+                </div>
+                {errors.email && (
+                  <p className="text-sm text-destructive">{errors.email}</p>
+                )}
+              </div>
+            )}
+
+            {/* Register No (Login and Sign Up) */}
+            {!isForgotPassword && (
+              <div className="space-y-2">
+                <Label htmlFor="registerNo">Register No</Label>
+                <div className="relative">
+                  <Hash className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="registerNo"
+                    type="text"
+                    placeholder="e.g., 41XXXXXXXX"
+                    value={registerNo}
+                    onChange={(e) => setRegisterNo(e.target.value.toUpperCase())}
+                    className="pl-10 uppercase"
+                  />
+                </div>
+                {errors.registerNo && (
+                  <p className="text-sm text-destructive">{errors.registerNo}</p>
+                )}
+              </div>
+            )}
+
             {/* Official Access Request (Sign Up only) */}
             {!isLogin && !isForgotPassword && (
               <motion.div
@@ -287,7 +360,7 @@ export default function AuthPage() {
                       Request Official/Admin Access
                     </Label>
                     <p className="text-xs text-muted-foreground">
-                      Submit a request for official access to manage incident reports
+                      Submit a request for official access
                     </p>
                   </div>
                 </div>
@@ -299,7 +372,7 @@ export default function AuthPage() {
                     exit={{ opacity: 0, height: 0 }}
                     className="space-y-2"
                   >
-                    <Label htmlFor="reason">Reason for Request (Optional)</Label>
+                    <Label htmlFor="reason">Reason (Optional)</Label>
                     <div className="relative">
                       <FileText className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                       <Textarea
@@ -307,7 +380,7 @@ export default function AuthPage() {
                         placeholder="Why do you need official access?"
                         value={accessRequestReason}
                         onChange={(e) => setAccessRequestReason(e.target.value)}
-                        className="pl-10 min-h-[80px]"
+                        className="pl-10 min-h-[60px]"
                         maxLength={500}
                       />
                     </div>
@@ -315,25 +388,6 @@ export default function AuthPage() {
                 )}
               </motion.div>
             )}
-
-            {/* Email */}
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="name@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-              {errors.email && (
-                <p className="text-sm text-destructive">{errors.email}</p>
-              )}
-            </div>
 
             {/* Password */}
             {!isForgotPassword && (
