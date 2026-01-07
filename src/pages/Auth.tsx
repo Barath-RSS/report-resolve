@@ -151,24 +151,21 @@ export default function AuthPage() {
       } else if (isLogin) {
         let loginEmail = email;
         
-        // For students, look up email by register number
+        // For students, look up email by register number (via backend function)
         if (userType === 'student') {
-          const { data: profileData, error: profileError } = await supabase
-            .from('profiles')
-            .select('email')
-            .ilike('register_no', registerNo.trim())
-            .maybeSingle();
-          
-          if (profileError) {
-            console.error('Profile lookup error:', profileError);
-            throw new Error('Error looking up your account. Please try again.');
+          const { data, error: lookupError } = await supabase.functions.invoke('student-lookup', {
+            body: { registerNo: registerNo.trim() },
+          });
+
+          if (lookupError) {
+            throw new Error('Unable to find your account right now. Please try again.');
           }
-          
-          if (!profileData?.email) {
+
+          if (!data?.email) {
             throw new Error('Register number not found. Please sign up first.');
           }
-          
-          loginEmail = profileData.email;
+
+          loginEmail = data.email;
         }
         
         const { error } = await signIn(loginEmail, password);
@@ -186,6 +183,17 @@ export default function AuthPage() {
       } else {
         // Sign up
         const formattedRegisterNo = userType === 'student' ? registerNo.trim().toUpperCase() : null;
+
+        // Prevent confusing 500s: if student register no already exists, guide them to login
+        if (userType === 'student' && formattedRegisterNo) {
+          const { data: existing, error: lookupError } = await supabase.functions.invoke('student-lookup', {
+            body: { registerNo: formattedRegisterNo },
+          });
+
+          if (!lookupError && existing?.email) {
+            throw new Error('This register number is already registered. Please sign in instead.');
+          }
+        }
         
         const { error, data } = await signUp(
           email, 
