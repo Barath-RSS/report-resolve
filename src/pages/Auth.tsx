@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { z } from 'zod';
-import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User, Users, LayoutDashboard, Command, FileText, Hash } from 'lucide-react';
+import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User, Users, LayoutDashboard, Command, FileText, Hash, GraduationCap, Briefcase } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -10,8 +10,6 @@ import { AnimatedButton } from '@/components/AnimatedButton';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { PageTransition } from '@/components/ui/PageTransition';
 import { supabase } from '@/integrations/supabase/client';
@@ -21,18 +19,25 @@ const emailSchema = z.string().email('Invalid email format').max(255);
 const passwordSchema = z.string().min(6, 'Password must be at least 6 characters').max(128);
 const nameSchema = z.string().min(2, 'Name must be at least 2 characters').max(100);
 const registerNoSchema = z.string().min(5, 'Register No must be at least 5 characters').max(20);
+const officialEmailSchema = z.string().email('Invalid email format').refine(
+  (email) => email.endsWith('@sathyabama.ac.in'),
+  { message: 'Officials must use @sathyabama.ac.in email' }
+);
+const studentEmailSchema = z.string().email('Invalid email format').refine(
+  (email) => !email.endsWith('@sathyabama.ac.in'),
+  { message: 'Students should use personal email (not @sathyabama.ac.in)' }
+);
 
-type SelectedRole = 'student' | 'official';
+type UserType = 'student' | 'official';
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
   const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [userType, setUserType] = useState<UserType>('student');
   const [email, setEmail] = useState('');
   const [registerNo, setRegisterNo] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
-  const [selectedRole, setSelectedRole] = useState<SelectedRole>('student');
-  const [requestOfficialAccess, setRequestOfficialAccess] = useState(false);
   const [accessRequestReason, setAccessRequestReason] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
@@ -46,20 +51,23 @@ export default function AuthPage() {
 
   useEffect(() => {
     if (!authLoading && user && role) {
-      if (role !== selectedRole) {
-        toast({
-          title: 'Access Denied',
-          description: `You don't have ${selectedRole === 'official' ? 'Official' : 'Student'} access. Redirecting to your dashboard.`,
-          variant: 'destructive',
-        });
-      }
       if (role === 'official') {
         navigate('/command-center');
       } else {
         navigate('/dashboard');
       }
     }
-  }, [user, role, authLoading, navigate, selectedRole, toast]);
+  }, [user, role, authLoading, navigate]);
+
+  // Reset form when switching user type or auth mode
+  useEffect(() => {
+    setEmail('');
+    setRegisterNo('');
+    setPassword('');
+    setFullName('');
+    setAccessRequestReason('');
+    setErrors({});
+  }, [userType, isLogin]);
 
   const detectCapsLock = (e: React.KeyboardEvent) => {
     setCapsLock(e.getModifierState('CapsLock'));
@@ -74,21 +82,25 @@ export default function AuthPage() {
         newErrors.email = emailResult.error.errors[0].message;
       }
     } else if (isLogin) {
-      // Login uses register no
-      const registerNoResult = registerNoSchema.safeParse(registerNo);
-      if (!registerNoResult.success) {
-        newErrors.registerNo = registerNoResult.error.errors[0].message;
+      // Login validation
+      if (userType === 'student') {
+        const registerNoResult = registerNoSchema.safeParse(registerNo);
+        if (!registerNoResult.success) {
+          newErrors.registerNo = registerNoResult.error.errors[0].message;
+        }
+      } else {
+        // Official login with email
+        const emailResult = officialEmailSchema.safeParse(email);
+        if (!emailResult.success) {
+          newErrors.email = emailResult.error.errors[0].message;
+        }
       }
       const passwordResult = passwordSchema.safeParse(password);
       if (!passwordResult.success) {
         newErrors.password = passwordResult.error.errors[0].message;
       }
     } else {
-      // Sign up requires all fields
-      const emailResult = emailSchema.safeParse(email);
-      if (!emailResult.success) {
-        newErrors.email = emailResult.error.errors[0].message;
-      }
+      // Sign up validation
       const passwordResult = passwordSchema.safeParse(password);
       if (!passwordResult.success) {
         newErrors.password = passwordResult.error.errors[0].message;
@@ -97,9 +109,22 @@ export default function AuthPage() {
       if (!nameResult.success) {
         newErrors.fullName = nameResult.error.errors[0].message;
       }
-      const registerNoResult = registerNoSchema.safeParse(registerNo);
-      if (!registerNoResult.success) {
-        newErrors.registerNo = registerNoResult.error.errors[0].message;
+      
+      if (userType === 'student') {
+        const emailResult = studentEmailSchema.safeParse(email);
+        if (!emailResult.success) {
+          newErrors.email = emailResult.error.errors[0].message;
+        }
+        const registerNoResult = registerNoSchema.safeParse(registerNo);
+        if (!registerNoResult.success) {
+          newErrors.registerNo = registerNoResult.error.errors[0].message;
+        }
+      } else {
+        // Official sign up
+        const emailResult = officialEmailSchema.safeParse(email);
+        if (!emailResult.success) {
+          newErrors.email = emailResult.error.errors[0].message;
+        }
       }
     }
     
@@ -124,49 +149,84 @@ export default function AuthPage() {
         });
         setIsForgotPassword(false);
       } else if (isLogin) {
-        // Find email by register no first
-        const { data: profileData, error: profileError } = await supabase
-          .from('profiles')
-          .select('email')
-          .eq('register_no', registerNo.trim().toUpperCase())
-          .maybeSingle();
+        let loginEmail = email;
         
-        if (profileError || !profileData?.email) {
-          throw new Error('Register number not found. Please check and try again.');
+        // For students, look up email by register number
+        if (userType === 'student') {
+          const { data: profileData, error: profileError } = await supabase
+            .from('profiles')
+            .select('email')
+            .ilike('register_no', registerNo.trim())
+            .maybeSingle();
+          
+          if (profileError) {
+            console.error('Profile lookup error:', profileError);
+            throw new Error('Error looking up your account. Please try again.');
+          }
+          
+          if (!profileData?.email) {
+            throw new Error('Register number not found. Please sign up first.');
+          }
+          
+          loginEmail = profileData.email;
         }
         
-        const { error } = await signIn(profileData.email, password);
-        if (error) throw error;
+        const { error } = await signIn(loginEmail, password);
+        if (error) {
+          if (error.message.includes('Invalid login credentials')) {
+            throw new Error('Invalid credentials. Please check your password.');
+          }
+          throw error;
+        }
+        
         toast({
-          title: 'Signing in...',
-          description: 'Verifying your credentials.',
+          title: 'Welcome back!',
+          description: 'Signing you in...',
         });
       } else {
-        const { error, data } = await signUp(email, password, fullName, registerNo.trim().toUpperCase());
-        if (error) throw error;
+        // Sign up
+        const formattedRegisterNo = userType === 'student' ? registerNo.trim().toUpperCase() : null;
         
-        if (requestOfficialAccess && data?.user) {
+        const { error, data } = await signUp(
+          email, 
+          password, 
+          fullName, 
+          formattedRegisterNo || ''
+        );
+        
+        if (error) {
+          if (error.message.includes('already registered')) {
+            throw new Error('This email is already registered. Please sign in instead.');
+          }
+          throw error;
+        }
+        
+        // For officials, create access request
+        if (userType === 'official' && data?.user) {
           const { error: requestError } = await supabase
             .from('access_requests')
             .insert({
               user_id: data.user.id,
               full_name: fullName,
               email: email,
-              reason: accessRequestReason || null,
+              reason: accessRequestReason || 'Official access request',
               status: 'pending'
             });
           
           if (requestError) {
             console.error('Error creating access request:', requestError);
           }
+          
+          toast({
+            title: 'Account created!',
+            description: 'Your official access request has been submitted for admin approval.',
+          });
+        } else {
+          toast({
+            title: 'Account created!',
+            description: 'Welcome to the Campus Issue Reporting System.',
+          });
         }
-        
-        toast({
-          title: 'Account created!',
-          description: requestOfficialAccess 
-            ? 'Your official access request has been submitted for review.'
-            : 'Welcome to the Campus Issue Reporting System.',
-        });
       }
     } catch (error: any) {
       toast({
@@ -191,14 +251,14 @@ export default function AuthPage() {
         transition={{ duration: 0.4 }}
         className="w-full max-w-md"
       >
-        <div className="glass-card rounded-2xl p-8 shadow-xl">
+        <div className="glass-card rounded-2xl p-6 sm:p-8 shadow-xl">
           {/* Logo & Title */}
-          <div className="text-center mb-8">
+          <div className="text-center mb-6">
             <motion.div
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ type: 'spring', stiffness: 200, delay: 0.1 }}
-              className="inline-flex items-center justify-center w-20 h-20 rounded-full overflow-hidden border-2 border-primary/20 mb-4 shadow-lg"
+              className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full overflow-hidden border-2 border-primary/20 mb-4 shadow-lg"
             >
               <img 
                 src={collegeLogo} 
@@ -206,73 +266,88 @@ export default function AuthPage() {
                 className="w-full h-full object-contain bg-white p-1"
               />
             </motion.div>
-            <h1 className="text-xl font-bold text-foreground">
+            <h1 className="text-lg sm:text-xl font-bold text-foreground">
               {isForgotPassword ? 'Reset Password' : isLogin ? 'Welcome Back' : 'Create Account'}
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-xs sm:text-sm text-muted-foreground mt-1">
               {isForgotPassword
                 ? 'Enter your email to receive a reset link'
                 : isLogin
-                ? 'Sign in with your Register No'
-                : 'Register for campus issue reporting'}
+                ? `Sign in as ${userType === 'student' ? 'Student' : 'Official'}`
+                : `Register as ${userType === 'student' ? 'Student' : 'Official'}`}
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Role Selection with Dashboard Indicator (Login only) */}
-            {isLogin && !isForgotPassword && (
-              <div className="space-y-3">
-                <div className="space-y-2">
-                  <Label htmlFor="role">Login As</Label>
-                  <div className="relative">
-                    <Users className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground z-10" />
-                    <Select value={selectedRole} onValueChange={(value: SelectedRole) => setSelectedRole(value)}>
-                      <SelectTrigger className="pl-10">
-                        <SelectValue placeholder="Select your role" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="student">Student</SelectItem>
-                        <SelectItem value="official">Official (Admin)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-                
-                {/* Dashboard Indicator */}
-                <AnimatePresence mode="wait">
-                  <motion.div
-                    key={selectedRole}
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 10 }}
-                    className={`flex items-center gap-3 p-3 rounded-lg border ${
-                      selectedRole === 'official' 
-                        ? 'bg-primary/10 border-primary/30' 
-                        : 'bg-muted/50 border-border'
-                    }`}
-                  >
-                    {selectedRole === 'official' ? (
-                      <>
-                        <Command className="w-5 h-5 text-primary" />
-                        <div>
-                          <p className="text-sm font-medium text-foreground">Command Center</p>
-                          <p className="text-xs text-muted-foreground">Manage all incident reports</p>
-                        </div>
-                      </>
-                    ) : (
-                      <>
-                        <LayoutDashboard className="w-5 h-5 text-muted-foreground" />
-                        <div>
-                          <p className="text-sm font-medium text-foreground">Student Dashboard</p>
-                          <p className="text-xs text-muted-foreground">Submit and track reports</p>
-                        </div>
-                      </>
-                    )}
-                  </motion.div>
-                </AnimatePresence>
-              </div>
-            )}
+          {/* User Type Selector (not shown for forgot password) */}
+          {!isForgotPassword && (
+            <div className="flex gap-2 mb-6">
+              <button
+                type="button"
+                onClick={() => setUserType('student')}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl border-2 transition-all ${
+                  userType === 'student'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border bg-muted/30 text-muted-foreground hover:border-primary/50'
+                }`}
+              >
+                <GraduationCap className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span className="text-sm font-medium">Student</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setUserType('official')}
+                className={`flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl border-2 transition-all ${
+                  userType === 'official'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border bg-muted/30 text-muted-foreground hover:border-primary/50'
+                }`}
+              >
+                <Briefcase className="w-4 h-4 sm:w-5 sm:h-5" />
+                <span className="text-sm font-medium">Official</span>
+              </button>
+            </div>
+          )}
 
+          {/* Info Banner based on user type */}
+          {!isForgotPassword && (
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={`${userType}-${isLogin}`}
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                className={`flex items-center gap-3 p-3 rounded-lg border mb-4 ${
+                  userType === 'official' 
+                    ? 'bg-primary/10 border-primary/30' 
+                    : 'bg-muted/50 border-border'
+                }`}
+              >
+                {userType === 'official' ? (
+                  <>
+                    <Command className="w-5 h-5 text-primary flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">Command Center</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {isLogin ? 'Login with @sathyabama.ac.in email' : 'Use official email to register'}
+                      </p>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <LayoutDashboard className="w-5 h-5 text-muted-foreground flex-shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">Student Dashboard</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {isLogin ? 'Login with your Register No' : 'Use personal email to register'}
+                      </p>
+                    </div>
+                  </>
+                )}
+              </motion.div>
+            </AnimatePresence>
+          )}
+
+          <form onSubmit={handleSubmit} className="space-y-4">
             {/* Full Name (Sign Up only) */}
             {!isLogin && !isForgotPassword && (
               <motion.div
@@ -299,16 +374,19 @@ export default function AuthPage() {
               </motion.div>
             )}
 
-            {/* Email (Sign Up and Forgot Password only) */}
-            {(!isLogin || isForgotPassword) && (
+            {/* Email Field */}
+            {/* Show for: Official login, Official signup, Student signup, Forgot password */}
+            {(userType === 'official' || !isLogin || isForgotPassword) && (
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">
+                  {userType === 'official' ? 'Official Email' : 'Email'}
+                </Label>
                 <div className="relative">
                   <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     id="email"
                     type="email"
-                    placeholder="name@sathyabama.ac.in"
+                    placeholder={userType === 'official' ? 'name@sathyabama.ac.in' : 'yourname@gmail.com'}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="pl-10"
@@ -320,8 +398,8 @@ export default function AuthPage() {
               </div>
             )}
 
-            {/* Register No (Login and Sign Up) */}
-            {!isForgotPassword && (
+            {/* Register No (Students only - login and signup) */}
+            {userType === 'student' && !isForgotPassword && (
               <div className="space-y-2">
                 <Label htmlFor="registerNo">Register No</Label>
                 <div className="relative">
@@ -341,51 +419,29 @@ export default function AuthPage() {
               </div>
             )}
 
-            {/* Official Access Request (Sign Up only) */}
-            {!isLogin && !isForgotPassword && (
+            {/* Reason for Official Signup */}
+            {userType === 'official' && !isLogin && !isForgotPassword && (
               <motion.div
                 initial={{ opacity: 0, height: 0 }}
                 animate={{ opacity: 1, height: 'auto' }}
                 exit={{ opacity: 0, height: 0 }}
-                className="space-y-3"
+                className="space-y-2"
               >
-                <div className="flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/30">
-                  <Checkbox 
-                    id="requestOfficial" 
-                    checked={requestOfficialAccess}
-                    onCheckedChange={(checked) => setRequestOfficialAccess(checked === true)}
+                <Label htmlFor="reason">Department / Role (Optional)</Label>
+                <div className="relative">
+                  <FileText className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Textarea
+                    id="reason"
+                    placeholder="e.g., Maintenance Department, Faculty - CSE"
+                    value={accessRequestReason}
+                    onChange={(e) => setAccessRequestReason(e.target.value)}
+                    className="pl-10 min-h-[60px]"
+                    maxLength={500}
                   />
-                  <div className="space-y-1">
-                    <Label htmlFor="requestOfficial" className="text-sm font-medium cursor-pointer">
-                      Request Official/Admin Access
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Submit a request for official access
-                    </p>
-                  </div>
                 </div>
-                
-                {requestOfficialAccess && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="space-y-2"
-                  >
-                    <Label htmlFor="reason">Reason (Optional)</Label>
-                    <div className="relative">
-                      <FileText className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Textarea
-                        id="reason"
-                        placeholder="Why do you need official access?"
-                        value={accessRequestReason}
-                        onChange={(e) => setAccessRequestReason(e.target.value)}
-                        className="pl-10 min-h-[60px]"
-                        maxLength={500}
-                      />
-                    </div>
-                  </motion.div>
-                )}
+                <p className="text-xs text-muted-foreground">
+                  Admin approval required for official access
+                </p>
               </motion.div>
             )}
 
