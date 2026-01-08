@@ -3,7 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { 
   LayoutDashboard, FileText, CheckCircle2, Clock, 
   Search, Filter, MapPin, ExternalLink, Bell,
-  ChevronRight, AlertCircle, Loader2, Send, Eye
+  ChevronRight, AlertCircle, Loader2, Send, Eye,
+  UserCheck, UserX, Users
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -18,8 +19,19 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+
+interface AccessRequest {
+  id: string;
+  user_id: string;
+  full_name: string;
+  email: string;
+  reason: string | null;
+  status: string;
+  created_at: string;
+}
 
 interface Report {
   id: string;
@@ -61,12 +73,17 @@ export default function CommandCenter() {
   const [updating, setUpdating] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('reports');
+  const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
+  const [loadingRequests, setLoadingRequests] = useState(true);
+  const [processingRequest, setProcessingRequest] = useState<string | null>(null);
 
   const { signOut } = useAuth();
   const { toast } = useToast();
 
   useEffect(() => {
     fetchReports();
+    fetchAccessRequests();
 
     // Subscribe to real-time updates for new reports
     const channel = supabase
@@ -144,6 +161,69 @@ export default function CommandCenter() {
     }
     setLoading(false);
   };
+
+  const fetchAccessRequests = async () => {
+    setLoadingRequests(true);
+    const { data, error } = await supabase
+      .from('access_requests')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching access requests:', error);
+    } else {
+      setAccessRequests(data || []);
+    }
+    setLoadingRequests(false);
+  };
+
+  const handleAccessRequest = async (requestId: string, userId: string, action: 'approved' | 'rejected') => {
+    setProcessingRequest(requestId);
+    
+    try {
+      // Update the access request status
+      const { error: updateError } = await supabase
+        .from('access_requests')
+        .update({ 
+          status: action,
+          reviewed_at: new Date().toISOString()
+        })
+        .eq('id', requestId);
+
+      if (updateError) throw updateError;
+
+      // If approved, update user role to official
+      if (action === 'approved') {
+        const { error: roleError } = await supabase
+          .from('user_roles')
+          .update({ role: 'official' })
+          .eq('user_id', userId);
+
+        if (roleError) throw roleError;
+      }
+
+      toast({
+        title: action === 'approved' ? 'Request Approved' : 'Request Rejected',
+        description: action === 'approved' 
+          ? 'The user now has official access.' 
+          : 'The access request has been rejected.',
+      });
+
+      fetchAccessRequests();
+    } catch (error) {
+      console.error('Error processing request:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to process the request.',
+        variant: 'destructive',
+      });
+    } finally {
+      setProcessingRequest(null);
+    }
+  };
+
+  const pendingRequests = accessRequests.filter(r => r.status === 'pending');
+  const processedRequests = accessRequests.filter(r => r.status !== 'pending');
 
   const unreadCount = notifications.filter(n => !n.read).length;
 
@@ -353,7 +433,26 @@ export default function CommandCenter() {
       </header>
 
       <main className="container mx-auto px-4 py-8 space-y-8">
-        {/* Stats Bento Grid */}
+        {/* Tabs for Reports and Official Requests */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="reports" className="flex items-center gap-2">
+              <FileText className="w-4 h-4" />
+              Reports
+            </TabsTrigger>
+            <TabsTrigger value="requests" className="flex items-center gap-2">
+              <Users className="w-4 h-4" />
+              Official Requests
+              {pendingRequests.length > 0 && (
+                <span className="ml-1 px-2 py-0.5 text-xs rounded-full bg-destructive text-destructive-foreground">
+                  {pendingRequests.length}
+                </span>
+              )}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="reports" className="space-y-8 mt-6">
+            {/* Stats Bento Grid */}
         {loading ? (
           <StatsSkeleton />
         ) : (
@@ -562,6 +661,122 @@ export default function CommandCenter() {
             </div>
           </div>
         )}
+          </TabsContent>
+
+          <TabsContent value="requests" className="space-y-6 mt-6">
+            {/* Pending Requests */}
+            <div>
+              <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
+                <Clock className="w-5 h-5 text-warning" />
+                Pending Requests ({pendingRequests.length})
+              </h2>
+              
+              {loadingRequests ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                </div>
+              ) : pendingRequests.length === 0 ? (
+                <div className="text-center py-12 border border-border rounded-xl">
+                  <UserCheck className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
+                  <p className="text-muted-foreground">No pending requests</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {pendingRequests.map((request) => (
+                    <motion.div
+                      key={request.id}
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="p-4 border border-border rounded-xl bg-card"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                          <p className="font-medium text-foreground">{request.full_name}</p>
+                          <p className="text-sm text-muted-foreground">{request.email}</p>
+                          {request.reason && (
+                            <p className="text-sm text-muted-foreground mt-1 italic">
+                              "{request.reason}"
+                            </p>
+                          )}
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Requested: {new Date(request.created_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="text-destructive border-destructive/20 hover:bg-destructive/10"
+                            onClick={() => handleAccessRequest(request.id, request.user_id, 'rejected')}
+                            disabled={processingRequest === request.id}
+                          >
+                            {processingRequest === request.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <>
+                                <UserX className="w-4 h-4 mr-1" />
+                                Reject
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            size="sm"
+                            className="bg-success text-success-foreground hover:bg-success/90"
+                            onClick={() => handleAccessRequest(request.id, request.user_id, 'approved')}
+                            disabled={processingRequest === request.id}
+                          >
+                            {processingRequest === request.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              <>
+                                <UserCheck className="w-4 h-4 mr-1" />
+                                Approve
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Processed Requests */}
+            {processedRequests.length > 0 && (
+              <div>
+                <h2 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-success" />
+                  Processed Requests ({processedRequests.length})
+                </h2>
+                <div className="space-y-2">
+                  {processedRequests.slice(0, 10).map((request) => (
+                    <div
+                      key={request.id}
+                      className="p-3 border border-border rounded-lg bg-muted/30 flex items-center justify-between"
+                    >
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{request.full_name}</p>
+                        <p className="text-xs text-muted-foreground">{request.email}</p>
+                      </div>
+                      <Badge className={request.status === 'approved' 
+                        ? 'bg-success/10 text-success border-success/20' 
+                        : 'bg-destructive/10 text-destructive border-destructive/20'
+                      }>
+                        {request.status === 'approved' ? (
+                          <UserCheck className="w-3 h-3 mr-1" />
+                        ) : (
+                          <UserX className="w-3 h-3 mr-1" />
+                        )}
+                        {request.status}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </main>
 
       {/* Report Detail Sheet */}
