@@ -36,6 +36,9 @@ interface Report {
   is_anonymous: boolean;
   time_of_incident: string | null;
   official_response: string | null;
+  // Submitter info (fetched via join)
+  submitter_name?: string | null;
+  submitter_register_no?: string | null;
 }
 
 interface Notification {
@@ -110,20 +113,34 @@ export default function CommandCenter() {
   }, [reports, searchTerm, categoryFilter, statusFilter]);
 
   const fetchReports = async () => {
+    // Fetch reports with submitter profile info
     const { data, error } = await supabase
       .from('reports')
-      .select('*')
+      .select(`
+        *,
+        profiles!reports_user_id_fkey (
+          full_name,
+          register_no
+        )
+      `)
       .order('created_at', { ascending: false });
 
     if (error) {
       console.error('Error fetching reports:', error);
-      toast({
-        title: 'Error',
-        description: 'Failed to fetch reports.',
-        variant: 'destructive',
-      });
+      // Fallback to simple fetch if join fails
+      const { data: simpleData } = await supabase
+        .from('reports')
+        .select('*')
+        .order('created_at', { ascending: false });
+      setReports(simpleData || []);
     } else {
-      setReports(data || []);
+      // Map the joined data to our Report interface
+      const mappedReports = (data || []).map((r: any) => ({
+        ...r,
+        submitter_name: r.profiles?.full_name || null,
+        submitter_register_no: r.profiles?.register_no || null,
+      }));
+      setReports(mappedReports);
     }
     setLoading(false);
   };
@@ -467,6 +484,7 @@ export default function CommandCenter() {
                 <thead className="bg-muted/50">
                   <tr>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Date</th>
+                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Submitted By</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Category</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Issue</th>
                     <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
@@ -484,6 +502,23 @@ export default function CommandCenter() {
                     >
                       <td className="p-4 text-sm text-foreground">
                         {new Date(report.created_at).toLocaleDateString()}
+                      </td>
+                      <td className="p-4">
+                        {/* Hide submitter info for anonymous personal issues */}
+                        {report.is_anonymous && report.category === 'personal' ? (
+                          <div className="text-sm text-muted-foreground italic">
+                            Anonymous
+                          </div>
+                        ) : (
+                          <div className="max-w-[150px]">
+                            <p className="text-sm font-medium text-foreground truncate">
+                              {report.submitter_name || 'Unknown'}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {report.submitter_register_no || '-'}
+                            </p>
+                          </div>
+                        )}
                       </td>
                       <td className="p-4">
                         <span className="text-sm text-foreground capitalize">
@@ -559,6 +594,23 @@ export default function CommandCenter() {
                 <Label className="text-muted-foreground">Description</Label>
                 <p className="mt-1 text-foreground">{selectedReport.description}</p>
               </div>
+
+              {/* Submitter Info - hide for anonymous personal issues */}
+              {!(selectedReport.is_anonymous && selectedReport.category === 'personal') && (
+                <div>
+                  <Label className="text-muted-foreground">Submitted By</Label>
+                  <div className="mt-1 p-3 rounded-lg bg-muted/50">
+                    <p className="text-foreground font-medium">
+                      {selectedReport.submitter_name || 'Unknown'}
+                    </p>
+                    {selectedReport.submitter_register_no && (
+                      <p className="text-sm text-muted-foreground">
+                        Reg. No: {selectedReport.submitter_register_no}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {/* Category */}
               <div className="flex gap-4">
