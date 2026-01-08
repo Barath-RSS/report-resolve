@@ -43,6 +43,7 @@ export default function AuthPage() {
   const [capsLock, setCapsLock] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<{ email?: string; password?: string; fullName?: string; registerNo?: string }>({});
+  const [officialRequestSubmitted, setOfficialRequestSubmitted] = useState(false);
 
   const { signIn, signUp, resetPassword, user, role, loading: authLoading } = useAuth();
   const { theme } = useTheme();
@@ -209,7 +210,7 @@ export default function AuthPage() {
           throw error;
         }
         
-        // For officials, create access request
+        // For officials, create access request and show success message
         if (userType === 'official' && data?.user) {
           const { error: requestError } = await supabase
             .from('access_requests')
@@ -225,10 +226,12 @@ export default function AuthPage() {
             console.error('Error creating access request:', requestError);
           }
           
-          toast({
-            title: 'Account created!',
-            description: 'Your official access request has been submitted for admin approval.',
-          });
+          // Sign out the official since they need approval first
+          await supabase.auth.signOut();
+          
+          // Show the success message instead of redirecting
+          setOfficialRequestSubmitted(true);
+          return;
         } else {
           toast({
             title: 'Account created!',
@@ -246,6 +249,54 @@ export default function AuthPage() {
       setLoading(false);
     }
   };
+
+  // Show success message for official request
+  if (officialRequestSubmitted) {
+    return (
+      <PageTransition className="min-h-screen flex items-center justify-center p-4 bg-background">
+        <div className="absolute top-4 right-4">
+          <ThemeToggle />
+        </div>
+        
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.4 }}
+          className="w-full max-w-md"
+        >
+          <div className="glass-card rounded-2xl p-6 sm:p-8 shadow-xl text-center">
+            <motion.div
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 200, delay: 0.1 }}
+              className="inline-flex items-center justify-center w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-success/10 mb-4"
+            >
+              <Shield className="w-8 h-8 sm:w-10 sm:h-10 text-success" />
+            </motion.div>
+            
+            <h1 className="text-xl sm:text-2xl font-bold text-foreground mb-2">
+              Request Submitted!
+            </h1>
+            <p className="text-muted-foreground mb-6">
+              Your request for official access has been submitted successfully. 
+              An administrator will review and approve your request. 
+              You will be able to log in once your access is approved.
+            </p>
+            
+            <AnimatedButton
+              onClick={() => {
+                setOfficialRequestSubmitted(false);
+                setIsLogin(true);
+              }}
+              className="w-full gradient-primary text-primary-foreground"
+            >
+              Back to Login
+            </AnimatedButton>
+          </div>
+        </motion.div>
+      </PageTransition>
+    );
+  }
 
   return (
     <PageTransition className="min-h-screen flex items-center justify-center p-4 bg-background">
