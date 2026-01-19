@@ -335,8 +335,9 @@ export default function StudentDashboard() {
               )}
             </Button>
             <ThemeToggle />
-            <Button variant="outline" size="sm" onClick={signOut} className="hidden sm:flex">
-              Sign Out
+            <Button variant="outline" size="sm" onClick={signOut}>
+              <span className="hidden sm:inline">Sign Out</span>
+              <span className="sm:hidden">Exit</span>
             </Button>
           </div>
         </div>

@@ -4,7 +4,8 @@ import {
   LayoutDashboard, FileText, CheckCircle2, Clock, 
   Search, Filter, MapPin, ExternalLink, Bell,
   ChevronRight, AlertCircle, Loader2, Send, Eye,
-  UserCheck, UserX, Users
+  UserCheck, UserX, Users, Download, Trash2, 
+  PieChart as PieChartIcon, Database
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -20,8 +21,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
+import * as XLSX from 'xlsx';
 
 interface AccessRequest {
   id: string;
@@ -60,6 +64,12 @@ interface Notification {
   timestamp: Date;
 }
 
+const CHART_COLORS = {
+  pending: 'hsl(var(--warning))',
+  investigating: 'hsl(var(--primary))',
+  resolved: 'hsl(var(--success))',
+};
+
 export default function CommandCenter() {
   const [reports, setReports] = useState<Report[]>([]);
   const [filteredReports, setFilteredReports] = useState<Report[]>([]);
@@ -77,6 +87,8 @@ export default function CommandCenter() {
   const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
   const [loadingRequests, setLoadingRequests] = useState(true);
   const [processingRequest, setProcessingRequest] = useState<string | null>(null);
+  const [clearingStorage, setClearingStorage] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
 
   const { signOut } = useAuth();
   const { toast } = useToast();
@@ -243,7 +255,10 @@ export default function CommandCenter() {
       filtered = filtered.filter(
         (r) =>
           r.description.toLowerCase().includes(term) ||
-          r.sub_category.toLowerCase().includes(term)
+          r.sub_category.toLowerCase().includes(term) ||
+          r.landmark?.toLowerCase().includes(term) ||
+          r.submitter_name?.toLowerCase().includes(term) ||
+          r.submitter_register_no?.toLowerCase().includes(term)
       );
     }
 
@@ -295,12 +310,108 @@ export default function CommandCenter() {
     window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
   };
 
+  // Export reports to Excel
+  const exportToExcel = async () => {
+    setExportingExcel(true);
+    try {
+      const exportData = reports.map(report => ({
+        'Date': new Date(report.created_at).toLocaleDateString(),
+        'Category': report.category,
+        'Sub Category': report.sub_category.replace('_', ' '),
+        'Description': report.description,
+        'Location': report.landmark || 'N/A',
+        'Status': report.status,
+        'Submitter Name': (report.is_anonymous && report.category === 'personal') ? 'Anonymous' : (report.submitter_name || 'Unknown'),
+        'Register No': (report.is_anonymous && report.category === 'personal') ? 'N/A' : (report.submitter_register_no || 'N/A'),
+        'Image URL': report.image_url || 'No Image',
+        'Official Response': report.official_response || 'N/A',
+        'Time of Incident': report.time_of_incident ? new Date(report.time_of_incident).toLocaleString() : 'N/A'
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(exportData);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, 'Reports');
+      
+      // Auto-size columns
+      const maxWidth = 50;
+      const colWidths = Object.keys(exportData[0] || {}).map(key => ({
+        wch: Math.min(maxWidth, Math.max(key.length, ...exportData.map(row => String(row[key as keyof typeof row] || '').length)))
+      }));
+      worksheet['!cols'] = colWidths;
+
+      XLSX.writeFile(workbook, `incident_reports_${new Date().toISOString().split('T')[0]}.xlsx`);
+      
+      toast({
+        title: 'Export Successful',
+        description: 'Reports have been exported to Excel.',
+      });
+    } catch (error) {
+      console.error('Export error:', error);
+      toast({
+        title: 'Export Failed',
+        description: 'Failed to export reports.',
+        variant: 'destructive',
+      });
+    }
+    setExportingExcel(false);
+  };
+
+  // Clear cloud storage
+  const clearCloudStorage = async () => {
+    setClearingStorage(true);
+    try {
+      // First list all files in the bucket
+      const { data: files, error: listError } = await supabase.storage
+        .from('issue-images')
+        .list();
+
+      if (listError) throw listError;
+
+      if (files && files.length > 0) {
+        // Delete all files
+        const filePaths = files.map(file => file.name);
+        const { error: deleteError } = await supabase.storage
+          .from('issue-images')
+          .remove(filePaths);
+
+        if (deleteError) throw deleteError;
+      }
+
+      toast({
+        title: 'Storage Cleared',
+        description: `Successfully cleared ${files?.length || 0} files from cloud storage.`,
+      });
+    } catch (error) {
+      console.error('Clear storage error:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to clear cloud storage.',
+        variant: 'destructive',
+      });
+    }
+    setClearingStorage(false);
+  };
+
   const stats = {
     total: reports.length,
     pending: reports.filter((r) => r.status === 'pending').length,
     investigating: reports.filter((r) => r.status === 'investigating').length,
     resolved: reports.filter((r) => r.status === 'resolved').length,
   };
+
+  // Pie chart data
+  const pieChartData = [
+    { name: 'Pending', value: stats.pending, color: '#f59e0b' },
+    { name: 'Investigating', value: stats.investigating, color: '#7c1d3e' },
+    { name: 'Resolved', value: stats.resolved, color: '#22c55e' },
+  ].filter(item => item.value > 0);
+
+  // Category distribution data
+  const categoryData = [
+    { name: 'Infrastructure', value: reports.filter(r => r.category === 'infrastructure').length, color: '#3b82f6' },
+    { name: 'Personal', value: reports.filter(r => r.category === 'personal').length, color: '#ef4444' },
+    { name: 'Security', value: reports.filter(r => r.category === 'security').length, color: '#8b5cf6' },
+  ].filter(item => item.value > 0);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -339,7 +450,7 @@ export default function CommandCenter() {
             </div>
             <h1 className="text-xl font-bold text-foreground">Command Center</h1>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             {/* Notifications */}
             <Popover open={notificationOpen} onOpenChange={setNotificationOpen}>
               <PopoverTrigger asChild>
@@ -426,23 +537,28 @@ export default function CommandCenter() {
             </Popover>
             <ThemeToggle />
             <Button variant="outline" size="sm" onClick={signOut}>
-              Sign Out
+              <span className="hidden sm:inline">Sign Out</span>
+              <span className="sm:hidden">Exit</span>
             </Button>
           </div>
         </div>
       </header>
 
       <main className="container mx-auto px-4 py-8 space-y-8">
-        {/* Tabs for Reports and Official Requests */}
+        {/* Tabs for Reports, Analytics, and Official Requests */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full max-w-md grid-cols-2">
-            <TabsTrigger value="reports" className="flex items-center gap-2">
+          <TabsList className="grid w-full max-w-lg grid-cols-3">
+            <TabsTrigger value="reports" className="flex items-center gap-1 sm:gap-2">
               <FileText className="w-4 h-4" />
-              Reports
+              <span className="hidden sm:inline">Reports</span>
             </TabsTrigger>
-            <TabsTrigger value="requests" className="flex items-center gap-2">
+            <TabsTrigger value="analytics" className="flex items-center gap-1 sm:gap-2">
+              <PieChartIcon className="w-4 h-4" />
+              <span className="hidden sm:inline">Analytics</span>
+            </TabsTrigger>
+            <TabsTrigger value="requests" className="flex items-center gap-1 sm:gap-2">
               <Users className="w-4 h-4" />
-              Official Requests
+              <span className="hidden sm:inline">Requests</span>
               {pendingRequests.length > 0 && (
                 <span className="ml-1 px-2 py-0.5 text-xs rounded-full bg-destructive text-destructive-foreground">
                   {pendingRequests.length}
@@ -451,218 +567,394 @@ export default function CommandCenter() {
             </TabsTrigger>
           </TabsList>
 
+          {/* Reports Tab */}
           <TabsContent value="reports" className="space-y-8 mt-6">
+            {/* Action Buttons */}
+            <div className="flex flex-wrap gap-3">
+              <Button
+                variant="outline"
+                onClick={exportToExcel}
+                disabled={exportingExcel || reports.length === 0}
+              >
+                {exportingExcel ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4 mr-2" />
+                )}
+                Export Excel
+              </Button>
+              
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="outline" className="text-destructive border-destructive/30 hover:bg-destructive/10">
+                    <Database className="w-4 h-4 mr-2" />
+                    Clear Storage
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Clear Cloud Storage?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      This will permanently delete all images from cloud storage. 
+                      <span className="block mt-2 font-medium text-warning">
+                        Would you like to download the reports first?
+                      </span>
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter className="flex-col sm:flex-row gap-2">
+                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                    <Button variant="outline" onClick={exportToExcel} disabled={exportingExcel}>
+                      {exportingExcel ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                      Download First
+                    </Button>
+                    <AlertDialogAction
+                      onClick={clearCloudStorage}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      disabled={clearingStorage}
+                    >
+                      {clearingStorage ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Trash2 className="w-4 h-4 mr-2" />
+                      )}
+                      Clear Storage
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            </div>
+
             {/* Stats Bento Grid */}
-        {loading ? (
-          <StatsSkeleton />
-        ) : (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0 }}
-              className="rounded-xl border border-border bg-card p-6"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+            {loading ? (
+              <StatsSkeleton />
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0 }}
+                  className="rounded-xl border border-border bg-card p-6"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total Reports</p>
+                      <p className="text-2xl font-bold text-foreground">{stats.total}</p>
+                    </div>
+                  </div>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.1 }}
+                  className="rounded-xl border border-border bg-card p-6"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
+                      <Clock className="w-5 h-5 text-warning" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Pending</p>
+                      <p className="text-2xl font-bold text-foreground">{stats.pending}</p>
+                    </div>
+                  </div>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.2 }}
+                  className="rounded-xl border border-border bg-card p-6"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Loader2 className="w-5 h-5 text-primary" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Investigating</p>
+                      <p className="text-2xl font-bold text-foreground">{stats.investigating}</p>
+                    </div>
+                  </div>
+                </motion.div>
+
+                <motion.div
+                  initial={{ opacity: 0, y: 20 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="rounded-xl border border-border bg-card p-6"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
+                      <CheckCircle2 className="w-5 h-5 text-success" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Resolved</p>
+                      <p className="text-2xl font-bold text-foreground">{stats.resolved}</p>
+                    </div>
+                  </div>
+                </motion.div>
+              </div>
+            )}
+
+            {/* Filters */}
+            <div className="flex flex-col sm:flex-row gap-4">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search reports, names, register no..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                <SelectTrigger className="w-full sm:w-48">
+                  <Filter className="w-4 h-4 mr-2" />
+                  <SelectValue placeholder="Category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  <SelectItem value="infrastructure">Infrastructure</SelectItem>
+                  <SelectItem value="personal">Personal</SelectItem>
+                  <SelectItem value="security">Security</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-full sm:w-48">
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="investigating">Investigating</SelectItem>
+                  <SelectItem value="resolved">Resolved</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Reports Table */}
+            {loading ? (
+              <TableSkeleton rows={5} />
+            ) : filteredReports.length === 0 ? (
+              <div className="text-center py-16 border border-border rounded-xl">
+                <FileText className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
+                <h3 className="text-lg font-medium text-foreground">No Reports Found</h3>
+                <p className="text-muted-foreground mt-1">
+                  {reports.length === 0
+                    ? 'No incident reports have been submitted yet.'
+                    : 'No reports match your current filters.'}
+                </p>
+              </div>
+            ) : (
+              <div className="border border-border rounded-xl overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead className="bg-muted/50">
+                      <tr>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Date</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Submitted By</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Category</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Issue</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
+                        <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredReports.map((report, index) => (
+                        <motion.tr
+                          key={report.id}
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: index * 0.05 }}
+                          className="border-t border-border hover:bg-muted/30 transition-colors"
+                        >
+                          <td className="p-4 text-sm text-foreground">
+                            {new Date(report.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="p-4">
+                            {/* Hide submitter info for anonymous personal issues */}
+                            {report.is_anonymous && report.category === 'personal' ? (
+                              <div className="text-sm text-muted-foreground italic">
+                                Anonymous
+                              </div>
+                            ) : (
+                              <div className="max-w-[150px]">
+                                <p className="text-sm font-medium text-foreground truncate">
+                                  {report.submitter_name || 'Unknown'}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {report.submitter_register_no || '-'}
+                                </p>
+                              </div>
+                            )}
+                          </td>
+                          <td className="p-4">
+                            <span className="text-sm text-foreground capitalize">
+                              {report.category}
+                            </span>
+                          </td>
+                          <td className="p-4">
+                            <div className="max-w-xs">
+                              <p className="text-sm font-medium text-foreground capitalize">
+                                {report.sub_category.replace('_', ' ')}
+                              </p>
+                              <p className="text-sm text-muted-foreground truncate">
+                                {report.description}
+                              </p>
+                            </div>
+                          </td>
+                          <td className="p-4">
+                            <Badge className={getStatusColor(report.status)}>
+                              {getStatusIcon(report.status)}
+                              <span className="ml-1 capitalize">{report.status}</span>
+                            </Badge>
+                          </td>
+                          <td className="p-4">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedReport(report);
+                                setNewStatus(report.status);
+                                setOfficialResponse(report.official_response || '');
+                              }}
+                            >
+                              <Eye className="w-4 h-4 mr-2" />
+                              View
+                            </Button>
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </TabsContent>
+
+          {/* Analytics Tab */}
+          <TabsContent value="analytics" className="space-y-8 mt-6">
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Status Distribution */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-xl border border-border bg-card p-6"
+              >
+                <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
+                  <PieChartIcon className="w-5 h-5 text-primary" />
+                  Status Distribution
+                </h3>
+                {pieChartData.length === 0 ? (
+                  <div className="h-64 flex items-center justify-center text-muted-foreground">
+                    No data available
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Pie
+                        data={pieChartData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={100}
+                        paddingAngle={5}
+                        dataKey="value"
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {pieChartData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </motion.div>
+
+              {/* Category Distribution */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="rounded-xl border border-border bg-card p-6"
+              >
+                <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
                   <FileText className="w-5 h-5 text-primary" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Reports</p>
-                  <p className="text-2xl font-bold text-foreground">{stats.total}</p>
-                </div>
-              </div>
-            </motion.div>
+                  Category Distribution
+                </h3>
+                {categoryData.length === 0 ? (
+                  <div className="h-64 flex items-center justify-center text-muted-foreground">
+                    No data available
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={280}>
+                    <PieChart>
+                      <Pie
+                        data={categoryData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={60}
+                        outerRadius={100}
+                        paddingAngle={5}
+                        dataKey="value"
+                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                      >
+                        {categoryData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                )}
+              </motion.div>
+            </div>
 
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="rounded-xl border border-border bg-card p-6"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
-                  <Clock className="w-5 h-5 text-warning" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Pending</p>
-                  <p className="text-2xl font-bold text-foreground">{stats.pending}</p>
-                </div>
-              </div>
-            </motion.div>
-
+            {/* Summary Stats */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
               className="rounded-xl border border-border bg-card p-6"
             >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <Loader2 className="w-5 h-5 text-primary" />
+              <h3 className="text-lg font-semibold text-foreground mb-4">Summary</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="text-center p-4 rounded-lg bg-muted/50">
+                  <p className="text-3xl font-bold text-foreground">{stats.total}</p>
+                  <p className="text-sm text-muted-foreground">Total Reports</p>
                 </div>
-                <div>
+                <div className="text-center p-4 rounded-lg bg-warning/10">
+                  <p className="text-3xl font-bold text-warning">{stats.pending}</p>
+                  <p className="text-sm text-muted-foreground">Pending</p>
+                </div>
+                <div className="text-center p-4 rounded-lg bg-primary/10">
+                  <p className="text-3xl font-bold text-primary">{stats.investigating}</p>
                   <p className="text-sm text-muted-foreground">Investigating</p>
-                  <p className="text-2xl font-bold text-foreground">{stats.investigating}</p>
                 </div>
-              </div>
-            </motion.div>
-
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="rounded-xl border border-border bg-card p-6"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
-                  <CheckCircle2 className="w-5 h-5 text-success" />
-                </div>
-                <div>
+                <div className="text-center p-4 rounded-lg bg-success/10">
+                  <p className="text-3xl font-bold text-success">{stats.resolved}</p>
                   <p className="text-sm text-muted-foreground">Resolved</p>
-                  <p className="text-2xl font-bold text-foreground">{stats.resolved}</p>
                 </div>
               </div>
+              {stats.total > 0 && (
+                <div className="mt-4 p-4 rounded-lg bg-muted/30">
+                  <p className="text-sm text-muted-foreground">
+                    Resolution Rate: <span className="font-semibold text-foreground">
+                      {((stats.resolved / stats.total) * 100).toFixed(1)}%
+                    </span>
+                  </p>
+                </div>
+              )}
             </motion.div>
-          </div>
-        )}
-
-        {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Search reports..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="w-full sm:w-48">
-              <Filter className="w-4 h-4 mr-2" />
-              <SelectValue placeholder="Category" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
-              <SelectItem value="infrastructure">Infrastructure</SelectItem>
-              <SelectItem value="personal">Personal</SelectItem>
-              <SelectItem value="security">Security</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-48">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Status</SelectItem>
-              <SelectItem value="pending">Pending</SelectItem>
-              <SelectItem value="investigating">Investigating</SelectItem>
-              <SelectItem value="resolved">Resolved</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Reports Table */}
-        {loading ? (
-          <TableSkeleton rows={5} />
-        ) : filteredReports.length === 0 ? (
-          <div className="text-center py-16 border border-border rounded-xl">
-            <FileText className="w-16 h-16 mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-lg font-medium text-foreground">No Reports Found</h3>
-            <p className="text-muted-foreground mt-1">
-              {reports.length === 0
-                ? 'No incident reports have been submitted yet.'
-                : 'No reports match your current filters.'}
-            </p>
-          </div>
-        ) : (
-          <div className="border border-border rounded-xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Date</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Submitted By</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Category</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Issue</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Status</th>
-                    <th className="text-left p-4 text-sm font-medium text-muted-foreground">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredReports.map((report, index) => (
-                    <motion.tr
-                      key={report.id}
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      transition={{ delay: index * 0.05 }}
-                      className="border-t border-border hover:bg-muted/30 transition-colors"
-                    >
-                      <td className="p-4 text-sm text-foreground">
-                        {new Date(report.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="p-4">
-                        {/* Hide submitter info for anonymous personal issues */}
-                        {report.is_anonymous && report.category === 'personal' ? (
-                          <div className="text-sm text-muted-foreground italic">
-                            Anonymous
-                          </div>
-                        ) : (
-                          <div className="max-w-[150px]">
-                            <p className="text-sm font-medium text-foreground truncate">
-                              {report.submitter_name || 'Unknown'}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {report.submitter_register_no || '-'}
-                            </p>
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-4">
-                        <span className="text-sm text-foreground capitalize">
-                          {report.category}
-                        </span>
-                      </td>
-                      <td className="p-4">
-                        <div className="max-w-xs">
-                          <p className="text-sm font-medium text-foreground capitalize">
-                            {report.sub_category.replace('_', ' ')}
-                          </p>
-                          <p className="text-sm text-muted-foreground truncate">
-                            {report.description}
-                          </p>
-                        </div>
-                      </td>
-                      <td className="p-4">
-                        <Badge className={getStatusColor(report.status)}>
-                          {getStatusIcon(report.status)}
-                          <span className="ml-1 capitalize">{report.status}</span>
-                        </Badge>
-                      </td>
-                      <td className="p-4">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => {
-                            setSelectedReport(report);
-                            setNewStatus(report.status);
-                            setOfficialResponse(report.official_response || '');
-                          }}
-                        >
-                          <Eye className="w-4 h-4 mr-2" />
-                          View
-                        </Button>
-                      </td>
-                    </motion.tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
           </TabsContent>
 
+          {/* Official Requests Tab */}
           <TabsContent value="requests" className="space-y-6 mt-6">
             {/* Pending Requests */}
             <div>
@@ -868,25 +1160,23 @@ export default function CommandCenter() {
                   <Label className="text-muted-foreground">GPS Coordinates</Label>
                   <Button
                     variant="outline"
-                    className="mt-2 w-full"
+                    size="sm"
+                    className="mt-2"
                     onClick={() => openGoogleMaps(selectedReport.lat!, selectedReport.lng!)}
                   >
-                    <MapPin className="w-4 h-4 mr-2" />
+                    <ExternalLink className="w-4 h-4 mr-2" />
                     View on Google Maps
-                    <ExternalLink className="w-4 h-4 ml-2" />
                   </Button>
                 </div>
               )}
 
               {/* Update Status */}
-              <div className="border-t border-border pt-6 space-y-4">
-                <h3 className="font-semibold text-foreground">Update Report</h3>
-                
+              <div className="space-y-4 pt-4 border-t border-border">
                 <div className="space-y-2">
-                  <Label>Status</Label>
+                  <Label>Update Status</Label>
                   <Select value={newStatus} onValueChange={setNewStatus}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue placeholder="Select status" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="pending">Pending</SelectItem>
@@ -899,7 +1189,7 @@ export default function CommandCenter() {
                 <div className="space-y-2">
                   <Label>Official Response</Label>
                   <Textarea
-                    placeholder="Add a response for the student..."
+                    placeholder="Enter your response..."
                     value={officialResponse}
                     onChange={(e) => setOfficialResponse(e.target.value)}
                     rows={3}
