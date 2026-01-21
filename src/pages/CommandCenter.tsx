@@ -320,53 +320,43 @@ export default function CommandCenter() {
     window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
   };
 
-  // Helper function to fetch image as base64
-  const fetchImageAsBase64 = async (url: string): Promise<string | null> => {
-    try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result as string);
-        reader.onerror = () => resolve(null);
-        reader.readAsDataURL(blob);
-      });
-    } catch {
-      return null;
-    }
-  };
 
-  // Export reports to Excel with embedded images
+  // Export reports to Excel with image URLs (xlsx doesn't support embedded images)
   const exportToExcel = async () => {
     setExportingExcel(true);
     try {
+      if (reports.length === 0) {
+        toast({
+          title: 'No Reports',
+          description: 'There are no reports to export.',
+          variant: 'destructive',
+        });
+        setExportingExcel(false);
+        return;
+      }
+
       toast({
         title: 'Preparing Export',
-        description: 'Downloading images for the report. This may take a moment...',
+        description: 'Generating Excel report...',
       });
 
-      // Prepare data with images
-      const exportData = await Promise.all(reports.map(async (report) => {
-        let imageData = 'No Image';
-        if (report.image_url) {
-          const base64 = await fetchImageAsBase64(report.image_url);
-          imageData = base64 || report.image_url; // Fallback to URL if fetch fails
-        }
-
+      // Prepare data with all report info
+      const exportData = reports.map((report) => {
         return {
           'Date': new Date(report.created_at).toLocaleDateString(),
+          'Time': new Date(report.created_at).toLocaleTimeString(),
           'Category': report.category,
-          'Sub Category': report.sub_category.replace('_', ' '),
+          'Sub Category': report.sub_category.replace(/_/g, ' '),
           'Description': report.description,
           'Location': report.landmark || 'N/A',
           'Status': report.status,
           'Submitter Name': (report.is_anonymous && report.category === 'personal') ? 'Anonymous' : (report.submitter_name || 'N/A'),
           'Register No': (report.is_anonymous && report.category === 'personal') ? 'N/A' : (report.submitter_register_no || 'N/A'),
-          'Image': imageData,
+          'Image URL': report.image_url || 'No Image',
           'Official Response': report.official_response || 'N/A',
           'Time of Incident': report.time_of_incident ? new Date(report.time_of_incident).toLocaleString() : 'N/A'
         };
-      }));
+      });
 
       const worksheet = XLSX.utils.json_to_sheet(exportData);
       const workbook = XLSX.utils.book_new();
@@ -374,8 +364,9 @@ export default function CommandCenter() {
       
       // Auto-size columns
       const maxWidth = 60;
-      const colWidths = Object.keys(exportData[0] || {}).map(key => ({
-        wch: key === 'Image' ? 80 : Math.min(maxWidth, Math.max(key.length, ...exportData.map(row => String(row[key as keyof typeof row] || '').substring(0, 50).length)))
+      const keys = Object.keys(exportData[0] || {});
+      const colWidths = keys.map(key => ({
+        wch: key === 'Image URL' ? 80 : Math.min(maxWidth, Math.max(key.length, ...exportData.map(row => String(row[key as keyof typeof row] || '').substring(0, 50).length)))
       }));
       worksheet['!cols'] = colWidths;
 
@@ -383,7 +374,7 @@ export default function CommandCenter() {
       
       toast({
         title: 'Export Successful',
-        description: 'Reports have been exported to Excel with images embedded.',
+        description: `${reports.length} reports have been exported to Excel.`,
       });
     } catch (error) {
       console.error('Export error:', error);
@@ -400,21 +391,35 @@ export default function CommandCenter() {
   const clearCloudStorage = async () => {
     setClearingStorage(true);
     try {
-      // First list all files in the bucket
+      // List all files in the root of the bucket (files are stored at root level)
       const { data: files, error: listError } = await supabase.storage
         .from('issue-images')
-        .list();
+        .list('', { limit: 1000 });
 
-      if (listError) throw listError;
+      if (listError) {
+        console.error('List error:', listError);
+        throw listError;
+      }
+
+      console.log('Files found:', files);
+
+      // Filter out folders and get only files
+      const fileNames = (files || [])
+        .filter(file => file.name && !file.id?.includes('/'))
+        .map(file => file.name);
+
+      console.log('File names to delete:', fileNames);
 
       // Delete all files from storage
-      if (files && files.length > 0) {
-        const filePaths = files.map(file => file.name);
+      if (fileNames.length > 0) {
         const { error: deleteStorageError } = await supabase.storage
           .from('issue-images')
-          .remove(filePaths);
+          .remove(fileNames);
 
-        if (deleteStorageError) throw deleteStorageError;
+        if (deleteStorageError) {
+          console.error('Delete storage error:', deleteStorageError);
+          throw deleteStorageError;
+        }
       }
 
       // Delete all reports from the database
@@ -423,7 +428,10 @@ export default function CommandCenter() {
         .delete()
         .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all (neq with impossible ID)
 
-      if (deleteReportsError) throw deleteReportsError;
+      if (deleteReportsError) {
+        console.error('Delete reports error:', deleteReportsError);
+        throw deleteReportsError;
+      }
 
       // Refresh reports list
       setReports([]);
@@ -431,13 +439,13 @@ export default function CommandCenter() {
 
       toast({
         title: 'Storage & Reports Cleared',
-        description: `Successfully cleared ${files?.length || 0} files and all reports from the database.`,
+        description: `Successfully cleared ${fileNames.length} files and all reports from the database.`,
       });
     } catch (error) {
       console.error('Clear storage error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to clear storage and reports.',
+        description: 'Failed to clear storage and reports. Check console for details.',
         variant: 'destructive',
       });
     }
@@ -888,115 +896,35 @@ export default function CommandCenter() {
           </TabsContent>
 
           {/* Analytics Tab */}
-          <TabsContent value="analytics" className="space-y-8 mt-6">
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* Status Distribution */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="rounded-xl border border-border bg-card p-6"
-              >
-                <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
-                  <PieChartIcon className="w-5 h-5 text-primary" />
-                  Status Distribution
-                </h3>
-                {pieChartData.length === 0 ? (
-                  <div className="h-64 flex items-center justify-center text-muted-foreground">
-                    No data available
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={280}>
-                    <PieChart>
-                      <Pie
-                        data={pieChartData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={100}
-                        paddingAngle={5}
-                        dataKey="value"
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      >
-                        {pieChartData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
-              </motion.div>
-
-              {/* Category Distribution */}
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1 }}
-                className="rounded-xl border border-border bg-card p-6"
-              >
-                <h3 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
-                  <FileText className="w-5 h-5 text-primary" />
-                  Category Distribution
-                </h3>
-                {categoryData.length === 0 ? (
-                  <div className="h-64 flex items-center justify-center text-muted-foreground">
-                    No data available
-                  </div>
-                ) : (
-                  <ResponsiveContainer width="100%" height={280}>
-                    <PieChart>
-                      <Pie
-                        data={categoryData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={60}
-                        outerRadius={100}
-                        paddingAngle={5}
-                        dataKey="value"
-                        label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                      >
-                        {categoryData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                      <Legend />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
-              </motion.div>
-            </div>
-
-            {/* Summary Stats */}
+          <TabsContent value="analytics" className="space-y-6 mt-6">
+            {/* Summary Stats - First on mobile */}
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.2 }}
-              className="rounded-xl border border-border bg-card p-6"
+              className="rounded-xl border border-border bg-card p-4 sm:p-6"
             >
-              <h3 className="text-lg font-semibold text-foreground mb-4">Summary</h3>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="text-center p-4 rounded-lg bg-muted/50">
-                  <p className="text-3xl font-bold text-foreground">{stats.total}</p>
-                  <p className="text-sm text-muted-foreground">Total Reports</p>
+              <h3 className="text-base sm:text-lg font-semibold text-foreground mb-4">Summary</h3>
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                <div className="text-center p-3 sm:p-4 rounded-lg bg-muted/50">
+                  <p className="text-2xl sm:text-3xl font-bold text-foreground">{stats.total}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">Total</p>
                 </div>
-                <div className="text-center p-4 rounded-lg bg-warning/10">
-                  <p className="text-3xl font-bold text-warning">{stats.pending}</p>
-                  <p className="text-sm text-muted-foreground">Pending</p>
+                <div className="text-center p-3 sm:p-4 rounded-lg bg-warning/10">
+                  <p className="text-2xl sm:text-3xl font-bold text-warning">{stats.pending}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">Pending</p>
                 </div>
-                <div className="text-center p-4 rounded-lg bg-primary/10">
-                  <p className="text-3xl font-bold text-primary">{stats.investigating}</p>
-                  <p className="text-sm text-muted-foreground">Investigating</p>
+                <div className="text-center p-3 sm:p-4 rounded-lg bg-primary/10">
+                  <p className="text-2xl sm:text-3xl font-bold text-primary">{stats.investigating}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">Investigating</p>
                 </div>
-                <div className="text-center p-4 rounded-lg bg-success/10">
-                  <p className="text-3xl font-bold text-success">{stats.resolved}</p>
-                  <p className="text-sm text-muted-foreground">Resolved</p>
+                <div className="text-center p-3 sm:p-4 rounded-lg bg-success/10">
+                  <p className="text-2xl sm:text-3xl font-bold text-success">{stats.resolved}</p>
+                  <p className="text-xs sm:text-sm text-muted-foreground">Resolved</p>
                 </div>
               </div>
               {stats.total > 0 && (
-                <div className="mt-4 p-4 rounded-lg bg-muted/30">
-                  <p className="text-sm text-muted-foreground">
+                <div className="mt-3 sm:mt-4 p-3 sm:p-4 rounded-lg bg-muted/30">
+                  <p className="text-xs sm:text-sm text-muted-foreground">
                     Resolution Rate: <span className="font-semibold text-foreground">
                       {((stats.resolved / stats.total) * 100).toFixed(1)}%
                     </span>
@@ -1004,6 +932,108 @@ export default function CommandCenter() {
                 </div>
               )}
             </motion.div>
+
+            <div className="grid md:grid-cols-2 gap-4 sm:gap-6">
+              {/* Status Distribution */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.1 }}
+                className="rounded-xl border border-border bg-card p-4 sm:p-6"
+              >
+                <h3 className="text-base sm:text-lg font-semibold text-foreground mb-3 sm:mb-4 flex items-center gap-2">
+                  <PieChartIcon className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                  Status Distribution
+                </h3>
+                {pieChartData.length === 0 ? (
+                  <div className="h-48 sm:h-64 flex items-center justify-center text-muted-foreground text-sm">
+                    No data available
+                  </div>
+                ) : (
+                  <div className="h-48 sm:h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={pieChartData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={40}
+                          outerRadius={65}
+                          paddingAngle={3}
+                          dataKey="value"
+                          labelLine={false}
+                        >
+                          {pieChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip 
+                          formatter={(value: number) => [value, 'Reports']}
+                          contentStyle={{ fontSize: '12px' }}
+                        />
+                        <Legend 
+                          wrapperStyle={{ fontSize: '11px' }}
+                          formatter={(value, entry) => {
+                            const item = pieChartData.find(d => d.name === value);
+                            return `${value}: ${item?.value || 0}`;
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </motion.div>
+
+              {/* Category Distribution */}
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="rounded-xl border border-border bg-card p-4 sm:p-6"
+              >
+                <h3 className="text-base sm:text-lg font-semibold text-foreground mb-3 sm:mb-4 flex items-center gap-2">
+                  <FileText className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                  Category Distribution
+                </h3>
+                {categoryData.length === 0 ? (
+                  <div className="h-48 sm:h-64 flex items-center justify-center text-muted-foreground text-sm">
+                    No data available
+                  </div>
+                ) : (
+                  <div className="h-48 sm:h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={categoryData}
+                          cx="50%"
+                          cy="50%"
+                          innerRadius={40}
+                          outerRadius={65}
+                          paddingAngle={3}
+                          dataKey="value"
+                          labelLine={false}
+                        >
+                          {categoryData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip 
+                          formatter={(value: number) => [value, 'Reports']}
+                          contentStyle={{ fontSize: '12px' }}
+                        />
+                        <Legend 
+                          wrapperStyle={{ fontSize: '11px' }}
+                          formatter={(value, entry) => {
+                            const item = categoryData.find(d => d.name === value);
+                            return `${value}: ${item?.value || 0}`;
+                          }}
+                        />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </motion.div>
+            </div>
           </TabsContent>
 
           {/* Official Requests Tab */}
