@@ -142,35 +142,45 @@ export default function CommandCenter() {
   }, [reports, searchTerm, categoryFilter, statusFilter]);
 
   const fetchReports = async () => {
-    // Fetch reports with submitter profile info
-    const { data, error } = await supabase
+    // Fetch reports first
+    const { data: reportsData, error: reportsError } = await supabase
       .from('reports')
-      .select(`
-        *,
-        profiles!reports_user_id_fkey (
-          full_name,
-          register_no
-        )
-      `)
+      .select('*')
       .order('created_at', { ascending: false });
 
-    if (error) {
-      console.error('Error fetching reports:', error);
-      // Fallback to simple fetch if join fails
-      const { data: simpleData } = await supabase
-        .from('reports')
-        .select('*')
-        .order('created_at', { ascending: false });
-      setReports(simpleData || []);
-    } else {
-      // Map the joined data to our Report interface
-      const mappedReports = (data || []).map((r: any) => ({
-        ...r,
-        submitter_name: r.profiles?.full_name || null,
-        submitter_register_no: r.profiles?.register_no || null,
-      }));
-      setReports(mappedReports);
+    if (reportsError) {
+      console.error('Error fetching reports:', reportsError);
+      setReports([]);
+      setLoading(false);
+      return;
     }
+
+    // Fetch all profiles to map user_id to profile info
+    const { data: profilesData, error: profilesError } = await supabase
+      .from('profiles')
+      .select('user_id, full_name, register_no');
+
+    if (profilesError) {
+      console.error('Error fetching profiles:', profilesError);
+    }
+
+    // Create a map of user_id to profile for quick lookup
+    const profilesMap = new Map<string, { full_name: string | null; register_no: string | null }>();
+    (profilesData || []).forEach((p) => {
+      profilesMap.set(p.user_id, { full_name: p.full_name, register_no: p.register_no });
+    });
+
+    // Map reports with submitter info
+    const mappedReports = (reportsData || []).map((r) => {
+      const profile = profilesMap.get(r.user_id);
+      return {
+        ...r,
+        submitter_name: profile?.full_name || null,
+        submitter_register_no: profile?.register_no || null,
+      };
+    });
+
+    setReports(mappedReports);
     setLoading(false);
   };
 
@@ -310,22 +320,52 @@ export default function CommandCenter() {
     window.open(`https://www.google.com/maps?q=${lat},${lng}`, '_blank');
   };
 
-  // Export reports to Excel
+  // Helper function to fetch image as base64
+  const fetchImageAsBase64 = async (url: string): Promise<string | null> => {
+    try {
+      const response = await fetch(url);
+      const blob = await response.blob();
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  // Export reports to Excel with embedded images
   const exportToExcel = async () => {
     setExportingExcel(true);
     try {
-      const exportData = reports.map(report => ({
-        'Date': new Date(report.created_at).toLocaleDateString(),
-        'Category': report.category,
-        'Sub Category': report.sub_category.replace('_', ' '),
-        'Description': report.description,
-        'Location': report.landmark || 'N/A',
-        'Status': report.status,
-        'Submitter Name': (report.is_anonymous && report.category === 'personal') ? 'Anonymous' : (report.submitter_name || 'Unknown'),
-        'Register No': (report.is_anonymous && report.category === 'personal') ? 'N/A' : (report.submitter_register_no || 'N/A'),
-        'Image URL': report.image_url || 'No Image',
-        'Official Response': report.official_response || 'N/A',
-        'Time of Incident': report.time_of_incident ? new Date(report.time_of_incident).toLocaleString() : 'N/A'
+      toast({
+        title: 'Preparing Export',
+        description: 'Downloading images for the report. This may take a moment...',
+      });
+
+      // Prepare data with images
+      const exportData = await Promise.all(reports.map(async (report) => {
+        let imageData = 'No Image';
+        if (report.image_url) {
+          const base64 = await fetchImageAsBase64(report.image_url);
+          imageData = base64 || report.image_url; // Fallback to URL if fetch fails
+        }
+
+        return {
+          'Date': new Date(report.created_at).toLocaleDateString(),
+          'Category': report.category,
+          'Sub Category': report.sub_category.replace('_', ' '),
+          'Description': report.description,
+          'Location': report.landmark || 'N/A',
+          'Status': report.status,
+          'Submitter Name': (report.is_anonymous && report.category === 'personal') ? 'Anonymous' : (report.submitter_name || 'N/A'),
+          'Register No': (report.is_anonymous && report.category === 'personal') ? 'N/A' : (report.submitter_register_no || 'N/A'),
+          'Image': imageData,
+          'Official Response': report.official_response || 'N/A',
+          'Time of Incident': report.time_of_incident ? new Date(report.time_of_incident).toLocaleString() : 'N/A'
+        };
       }));
 
       const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -333,9 +373,9 @@ export default function CommandCenter() {
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Reports');
       
       // Auto-size columns
-      const maxWidth = 50;
+      const maxWidth = 60;
       const colWidths = Object.keys(exportData[0] || {}).map(key => ({
-        wch: Math.min(maxWidth, Math.max(key.length, ...exportData.map(row => String(row[key as keyof typeof row] || '').length)))
+        wch: key === 'Image' ? 80 : Math.min(maxWidth, Math.max(key.length, ...exportData.map(row => String(row[key as keyof typeof row] || '').substring(0, 50).length)))
       }));
       worksheet['!cols'] = colWidths;
 
@@ -343,7 +383,7 @@ export default function CommandCenter() {
       
       toast({
         title: 'Export Successful',
-        description: 'Reports have been exported to Excel.',
+        description: 'Reports have been exported to Excel with images embedded.',
       });
     } catch (error) {
       console.error('Export error:', error);
@@ -356,7 +396,7 @@ export default function CommandCenter() {
     setExportingExcel(false);
   };
 
-  // Clear cloud storage
+  // Clear cloud storage and delete all reports
   const clearCloudStorage = async () => {
     setClearingStorage(true);
     try {
@@ -367,25 +407,37 @@ export default function CommandCenter() {
 
       if (listError) throw listError;
 
+      // Delete all files from storage
       if (files && files.length > 0) {
-        // Delete all files
         const filePaths = files.map(file => file.name);
-        const { error: deleteError } = await supabase.storage
+        const { error: deleteStorageError } = await supabase.storage
           .from('issue-images')
           .remove(filePaths);
 
-        if (deleteError) throw deleteError;
+        if (deleteStorageError) throw deleteStorageError;
       }
 
+      // Delete all reports from the database
+      const { error: deleteReportsError } = await supabase
+        .from('reports')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all (neq with impossible ID)
+
+      if (deleteReportsError) throw deleteReportsError;
+
+      // Refresh reports list
+      setReports([]);
+      setFilteredReports([]);
+
       toast({
-        title: 'Storage Cleared',
-        description: `Successfully cleared ${files?.length || 0} files from cloud storage.`,
+        title: 'Storage & Reports Cleared',
+        description: `Successfully cleared ${files?.length || 0} files and all reports from the database.`,
       });
     } catch (error) {
       console.error('Clear storage error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to clear cloud storage.',
+        description: 'Failed to clear storage and reports.',
         variant: 'destructive',
       });
     }
