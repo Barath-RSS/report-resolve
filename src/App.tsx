@@ -8,7 +8,6 @@ import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { AnimatePresence } from "framer-motion";
 import { SplashScreen } from "./components/SplashScreen";
-import Index from "./pages/Index";
 import Auth from "./pages/Auth";
 import StudentDashboard from "./pages/StudentDashboard";
 import CommandCenter from "./pages/CommandCenter";
@@ -39,11 +38,31 @@ function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; 
   return <>{children}</>;
 }
 
+function RedirectByRole() {
+  const { user, role, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  // If logged in, redirect to appropriate dashboard
+  if (user && role) {
+    return <Navigate to={role === 'official' ? '/command-center' : '/dashboard'} replace />;
+  }
+
+  // Otherwise redirect to auth
+  return <Navigate to="/auth" replace />;
+}
+
 function AppRoutes() {
   return (
     <AnimatePresence mode="wait">
       <Routes>
-        <Route path="/" element={<Index />} />
+        <Route path="/" element={<RedirectByRole />} />
         <Route path="/auth" element={<Auth />} />
         <Route
           path="/dashboard"

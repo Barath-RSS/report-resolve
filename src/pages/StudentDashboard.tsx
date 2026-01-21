@@ -24,6 +24,8 @@ import { useNavigate } from 'react-router-dom';
 
 import { Building2 } from 'lucide-react';
 
+import { MoreHorizontal } from 'lucide-react';
+
 const categories = {
   infrastructure: [
     { id: 'drainage', label: 'Drainage', icon: Droplets },
@@ -32,6 +34,7 @@ const categories = {
     { id: 'electrical', label: 'Electrical', icon: Zap },
     { id: 'water', label: 'Water', icon: Droplet },
     { id: 'classroom', label: 'Classroom', icon: Building2 },
+    { id: 'others', label: 'Others', icon: MoreHorizontal },
   ],
   personal: [
     { id: 'harassment', label: 'Harassment', icon: Users },
