@@ -26,6 +26,8 @@ import { Building2 } from 'lucide-react';
 
 import { MoreHorizontal } from 'lucide-react';
 
+import { FlaskConical } from 'lucide-react';
+
 const categories = {
   infrastructure: [
     { id: 'drainage', label: 'Drainage', icon: Droplets },
@@ -34,6 +36,7 @@ const categories = {
     { id: 'electrical', label: 'Electrical', icon: Zap },
     { id: 'water', label: 'Water', icon: Droplet },
     { id: 'classroom', label: 'Classroom', icon: Building2 },
+    { id: 'lab', label: 'Lab', icon: FlaskConical },
     { id: 'others', label: 'Others', icon: MoreHorizontal },
   ],
   personal: [
@@ -320,7 +323,7 @@ export default function StudentDashboard() {
             <div className="w-9 h-9 rounded-lg gradient-primary flex items-center justify-center">
               <FileText className="w-5 h-5 text-primary-foreground" />
             </div>
-            <h1 className="text-lg font-bold text-foreground">Incident Reporter</h1>
+            <h1 className="text-lg font-bold text-foreground">Campus Connect</h1>
           </div>
           <div className="flex items-center gap-2">
             <Button

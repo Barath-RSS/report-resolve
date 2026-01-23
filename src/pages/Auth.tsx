@@ -177,6 +177,43 @@ export default function AuthPage() {
           throw error;
         }
         
+        // After successful login, wait a moment for role to be fetched, then check role
+        // We need to check if this is an official login attempt and if the user actually has official role
+        if (userType === 'official') {
+          // Give a small delay for auth state to update
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Check the user's actual role
+          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          if (currentUser) {
+            const { data: roleData } = await supabase
+              .from('user_roles')
+              .select('role')
+              .eq('user_id', currentUser.id)
+              .maybeSingle();
+            
+            if (!roleData || roleData.role !== 'official') {
+              // Check if they have a pending access request
+              const { data: accessRequest } = await supabase
+                .from('access_requests')
+                .select('status')
+                .eq('user_id', currentUser.id)
+                .maybeSingle();
+              
+              // Sign them out
+              await supabase.auth.signOut();
+              
+              if (accessRequest?.status === 'pending') {
+                throw new Error('Your official access request is still pending approval. Please wait for an administrator to approve your request.');
+              } else if (accessRequest?.status === 'rejected') {
+                throw new Error('Your official access request was rejected. Please contact an administrator.');
+              } else {
+                throw new Error('You do not have official access. Please request official access first by signing up as an official.');
+              }
+            }
+          }
+        }
+        
         toast({
           title: 'Welcome back!',
           description: 'Signing you in...',
