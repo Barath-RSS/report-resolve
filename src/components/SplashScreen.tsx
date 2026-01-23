@@ -109,8 +109,11 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
             transition={{ delay: 1, duration: 0.5 }}
             className="absolute bottom-8 text-center"
           >
+            <p className="text-sm font-semibold text-primary">
+              Campus Connect
+            </p>
             <p className="text-xs text-muted-foreground">
-              Campus Issue Reporting System
+              Issue Reporting System
             </p>
           </motion.div>
         </motion.div>

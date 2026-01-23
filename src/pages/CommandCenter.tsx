@@ -5,7 +5,7 @@ import {
   Search, Filter, MapPin, ExternalLink, Bell,
   ChevronRight, AlertCircle, Loader2, Send, Eye,
   UserCheck, UserX, Users, Download, Trash2, 
-  PieChart as PieChartIcon, Database
+  PieChart as PieChartIcon, Database, HardDrive
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -25,7 +25,8 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
-import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
 
 interface AccessRequest {
   id: string;
@@ -88,7 +89,8 @@ export default function CommandCenter() {
   const [loadingRequests, setLoadingRequests] = useState(true);
   const [processingRequest, setProcessingRequest] = useState<string | null>(null);
   const [clearingStorage, setClearingStorage] = useState(false);
-  const [exportingExcel, setExportingExcel] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const [storageInfo, setStorageInfo] = useState<{ used: number; fileCount: number } | null>(null);
 
   const { signOut } = useAuth();
   const { toast } = useToast();
@@ -96,6 +98,7 @@ export default function CommandCenter() {
   useEffect(() => {
     fetchReports();
     fetchAccessRequests();
+    checkStorageUsage();
 
     // Subscribe to real-time updates for new reports
     const channel = supabase
@@ -321,9 +324,40 @@ export default function CommandCenter() {
   };
 
 
-  // Export reports to Excel with image URLs (xlsx doesn't support embedded images)
-  const exportToExcel = async () => {
-    setExportingExcel(true);
+  // Check storage usage
+  const checkStorageUsage = async () => {
+    try {
+      const { data: files, error } = await supabase.storage
+        .from('issue-images')
+        .list('', { limit: 1000 });
+      
+      if (error) {
+        console.error('Error checking storage:', error);
+        return;
+      }
+      
+      // Calculate approximate size (metadata doesn't include exact size, so estimate)
+      const fileCount = files?.length || 0;
+      const estimatedSize = fileCount * 500; // Estimate ~500KB average per image
+      
+      setStorageInfo({ used: estimatedSize, fileCount });
+      
+      // Show warning if storage is getting full (e.g., > 50 files as a rough threshold)
+      if (fileCount > 50) {
+        toast({
+          title: '⚠️ Storage Alert',
+          description: `Cloud storage has ${fileCount} files. Consider clearing old reports to free up space.`,
+          variant: 'destructive',
+        });
+      }
+    } catch (error) {
+      console.error('Storage check error:', error);
+    }
+  };
+
+  // Export reports to PDF with embedded images
+  const exportToPdf = async () => {
+    setExportingPdf(true);
     try {
       if (reports.length === 0) {
         toast({
@@ -331,50 +365,115 @@ export default function CommandCenter() {
           description: 'There are no reports to export.',
           variant: 'destructive',
         });
-        setExportingExcel(false);
+        setExportingPdf(false);
         return;
       }
 
       toast({
         title: 'Preparing Export',
-        description: 'Generating Excel report...',
+        description: 'Generating PDF report with images...',
       });
 
-      // Prepare data with all report info
-      const exportData = reports.map((report) => {
-        return {
-          'Date': new Date(report.created_at).toLocaleDateString(),
-          'Time': new Date(report.created_at).toLocaleTimeString(),
-          'Category': report.category,
-          'Sub Category': report.sub_category.replace(/_/g, ' '),
-          'Description': report.description,
-          'Location': report.landmark || 'N/A',
-          'Status': report.status,
-          'Submitter Name': (report.is_anonymous && report.category === 'personal') ? 'Anonymous' : (report.submitter_name || 'N/A'),
-          'Register No': (report.is_anonymous && report.category === 'personal') ? 'N/A' : (report.submitter_register_no || 'N/A'),
-          'Image URL': report.image_url || 'No Image',
-          'Official Response': report.official_response || 'N/A',
-          'Time of Incident': report.time_of_incident ? new Date(report.time_of_incident).toLocaleString() : 'N/A'
-        };
-      });
-
-      const worksheet = XLSX.utils.json_to_sheet(exportData);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Reports');
+      // Create PDF document
+      const doc = new jsPDF();
+      const pageWidth = doc.internal.pageSize.getWidth();
       
-      // Auto-size columns
-      const maxWidth = 60;
-      const keys = Object.keys(exportData[0] || {});
-      const colWidths = keys.map(key => ({
-        wch: key === 'Image URL' ? 80 : Math.min(maxWidth, Math.max(key.length, ...exportData.map(row => String(row[key as keyof typeof row] || '').substring(0, 50).length)))
-      }));
-      worksheet['!cols'] = colWidths;
-
-      XLSX.writeFile(workbook, `incident_reports_${new Date().toISOString().split('T')[0]}.xlsx`);
+      // Title
+      doc.setFontSize(20);
+      doc.text('Campus Connect - Incident Reports', pageWidth / 2, 20, { align: 'center' });
+      doc.setFontSize(10);
+      doc.text(`Generated on: ${new Date().toLocaleString()}`, pageWidth / 2, 28, { align: 'center' });
+      doc.text(`Total Reports: ${reports.length}`, pageWidth / 2, 34, { align: 'center' });
+      
+      let yPosition = 45;
+      
+      for (let i = 0; i < reports.length; i++) {
+        const report = reports[i];
+        
+        // Check if we need a new page
+        if (yPosition > 250) {
+          doc.addPage();
+          yPosition = 20;
+        }
+        
+        // Report header
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text(`Report #${i + 1}: ${report.sub_category.replace(/_/g, ' ')}`, 14, yPosition);
+        yPosition += 7;
+        
+        // Report details
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        
+        const details = [
+          `Date: ${new Date(report.created_at).toLocaleString()}`,
+          `Category: ${report.category} / ${report.sub_category.replace(/_/g, ' ')}`,
+          `Status: ${report.status.toUpperCase()}`,
+          `Location: ${report.landmark || 'Not specified'}`,
+          `Submitter: ${(report.is_anonymous && report.category === 'personal') ? 'Anonymous' : (report.submitter_name || 'Unknown')}`,
+          `Register No: ${(report.is_anonymous && report.category === 'personal') ? 'N/A' : (report.submitter_register_no || 'N/A')}`,
+        ];
+        
+        details.forEach(detail => {
+          doc.text(detail, 14, yPosition);
+          yPosition += 5;
+        });
+        
+        // Description (with word wrap)
+        const descLines = doc.splitTextToSize(`Description: ${report.description}`, pageWidth - 28);
+        doc.text(descLines, 14, yPosition);
+        yPosition += descLines.length * 5;
+        
+        if (report.official_response) {
+          const responseLines = doc.splitTextToSize(`Official Response: ${report.official_response}`, pageWidth - 28);
+          doc.text(responseLines, 14, yPosition);
+          yPosition += responseLines.length * 5;
+        }
+        
+        // Add image if available
+        if (report.image_url) {
+          try {
+            // Fetch image and convert to base64
+            const response = await fetch(report.image_url);
+            const blob = await response.blob();
+            const base64 = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.readAsDataURL(blob);
+            });
+            
+            // Check if we need a new page for image
+            if (yPosition > 200) {
+              doc.addPage();
+              yPosition = 20;
+            }
+            
+            // Add image to PDF
+            doc.addImage(base64, 'JPEG', 14, yPosition, 80, 60);
+            yPosition += 65;
+          } catch (imgError) {
+            console.error('Failed to load image:', imgError);
+            doc.text(`[Image unavailable: ${report.image_url}]`, 14, yPosition);
+            yPosition += 5;
+          }
+        }
+        
+        yPosition += 10; // Space between reports
+        
+        // Draw separator line
+        if (i < reports.length - 1) {
+          doc.setDrawColor(200);
+          doc.line(14, yPosition - 5, pageWidth - 14, yPosition - 5);
+        }
+      }
+      
+      // Save the PDF
+      doc.save(`campus_connect_reports_${new Date().toISOString().split('T')[0]}.pdf`);
       
       toast({
         title: 'Export Successful',
-        description: `${reports.length} reports have been exported to Excel.`,
+        description: `${reports.length} reports have been exported to PDF with images.`,
       });
     } catch (error) {
       console.error('Export error:', error);
@@ -384,7 +483,7 @@ export default function CommandCenter() {
         variant: 'destructive',
       });
     }
-    setExportingExcel(false);
+    setExportingPdf(false);
   };
 
   // Clear cloud storage and delete all reports
@@ -433,12 +532,13 @@ export default function CommandCenter() {
         throw deleteReportsError;
       }
 
-      // Refresh reports list
+      // Refresh reports list and storage info
       setReports([]);
       setFilteredReports([]);
+      setStorageInfo({ used: 0, fileCount: 0 });
 
       toast({
-        title: 'Storage & Reports Cleared',
+        title: 'All Reports & Storage Cleared',
         description: `Successfully cleared ${fileNames.length} files and all reports from the database.`,
       });
     } catch (error) {
@@ -508,7 +608,7 @@ export default function CommandCenter() {
             <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center">
               <LayoutDashboard className="w-5 h-5 text-primary-foreground" />
             </div>
-            <h1 className="text-xl font-bold text-foreground">Command Center</h1>
+            <h1 className="text-xl font-bold text-foreground">Campus Connect</h1>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             {/* Notifications */}
@@ -629,33 +729,52 @@ export default function CommandCenter() {
 
           {/* Reports Tab */}
           <TabsContent value="reports" className="space-y-8 mt-6">
+            {/* Storage Info Banner */}
+            {storageInfo && storageInfo.fileCount > 0 && (
+              <div className={`flex items-center gap-3 p-3 rounded-lg border ${
+                storageInfo.fileCount > 50 
+                  ? 'bg-destructive/10 border-destructive/30' 
+                  : 'bg-muted/50 border-border'
+              }`}>
+                <HardDrive className={`w-5 h-5 ${storageInfo.fileCount > 50 ? 'text-destructive' : 'text-muted-foreground'}`} />
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-foreground">
+                    Cloud Storage: {storageInfo.fileCount} files
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {storageInfo.fileCount > 50 ? 'Consider clearing old reports to free up space' : 'Storage usage is normal'}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Action Buttons */}
             <div className="flex flex-wrap gap-3">
               <Button
                 variant="outline"
-                onClick={exportToExcel}
-                disabled={exportingExcel || reports.length === 0}
+                onClick={exportToPdf}
+                disabled={exportingPdf || reports.length === 0}
               >
-                {exportingExcel ? (
+                {exportingPdf ? (
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
                   <Download className="w-4 h-4 mr-2" />
                 )}
-                Export Excel
+                Export PDF
               </Button>
               
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button variant="outline" className="text-destructive border-destructive/30 hover:bg-destructive/10">
                     <Database className="w-4 h-4 mr-2" />
-                    Clear Storage
+                    Clear Reports
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Clear Cloud Storage?</AlertDialogTitle>
+                    <AlertDialogTitle>Clear All Reports & Storage?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This will permanently delete all images from cloud storage. 
+                      This will permanently delete all reports from the database AND all images from cloud storage. 
                       <span className="block mt-2 font-medium text-warning">
                         Would you like to download the reports first?
                       </span>
@@ -663,8 +782,8 @@ export default function CommandCenter() {
                   </AlertDialogHeader>
                   <AlertDialogFooter className="flex-col sm:flex-row gap-2">
                     <AlertDialogCancel>Cancel</AlertDialogCancel>
-                    <Button variant="outline" onClick={exportToExcel} disabled={exportingExcel}>
-                      {exportingExcel ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+                    <Button variant="outline" onClick={exportToPdf} disabled={exportingPdf}>
+                      {exportingPdf ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
                       Download First
                     </Button>
                     <AlertDialogAction
@@ -677,7 +796,7 @@ export default function CommandCenter() {
                       ) : (
                         <Trash2 className="w-4 h-4 mr-2" />
                       )}
-                      Clear Storage
+                      Clear All
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>
