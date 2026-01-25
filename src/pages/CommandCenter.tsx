@@ -217,14 +217,31 @@ export default function CommandCenter() {
 
       if (updateError) throw updateError;
 
-      // If approved, update user role to official
+      // If approved, update user role to official (use upsert in case the row doesn't exist)
       if (action === 'approved') {
-        const { error: roleError } = await supabase
+        // First try to update existing role
+        const { data: existingRole } = await supabase
           .from('user_roles')
-          .update({ role: 'official' })
-          .eq('user_id', userId);
-
-        if (roleError) throw roleError;
+          .select('id')
+          .eq('user_id', userId)
+          .maybeSingle();
+        
+        if (existingRole) {
+          // Update existing role
+          const { error: roleError } = await supabase
+            .from('user_roles')
+            .update({ role: 'official' })
+            .eq('user_id', userId);
+          
+          if (roleError) throw roleError;
+        } else {
+          // Insert new role (this can happen if trigger didn't fire or user was created differently)
+          const { error: insertError } = await supabase
+            .from('user_roles')
+            .insert({ user_id: userId, role: 'official' });
+          
+          if (insertError) throw insertError;
+        }
       }
 
       toast({
