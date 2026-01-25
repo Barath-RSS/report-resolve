@@ -219,27 +219,20 @@ export default function CommandCenter() {
 
       // If approved, update user role to official (use upsert in case the row doesn't exist)
       if (action === 'approved') {
-        // First try to update existing role
-        const { data: existingRole } = await supabase
+        // Update first (handles duplicates safely); if nothing was updated, fall back to insert.
+        const { data: updatedRoles, error: updateRoleError } = await supabase
           .from('user_roles')
-          .select('id')
+          .update({ role: 'official' })
           .eq('user_id', userId)
-          .maybeSingle();
-        
-        if (existingRole) {
-          // Update existing role
-          const { error: roleError } = await supabase
-            .from('user_roles')
-            .update({ role: 'official' })
-            .eq('user_id', userId);
-          
-          if (roleError) throw roleError;
-        } else {
-          // Insert new role (this can happen if trigger didn't fire or user was created differently)
+          .select('id');
+
+        if (updateRoleError) throw updateRoleError;
+
+        if (!updatedRoles || updatedRoles.length === 0) {
           const { error: insertError } = await supabase
             .from('user_roles')
             .insert({ user_id: userId, role: 'official' });
-          
+
           if (insertError) throw insertError;
         }
       }
@@ -507,62 +500,35 @@ export default function CommandCenter() {
   const clearCloudStorage = async () => {
     setClearingStorage(true);
     try {
-      // List all files in the root of the bucket (files are stored at root level)
-      const { data: files, error: listError } = await supabase.storage
-        .from('issue-images')
-        .list('', { limit: 1000 });
+      // Use backend function so we can delete *all* objects (including nested folders)
+      // with elevated permissions.
+      const { data, error } = await supabase.functions.invoke('clear-issue-storage', {
+        body: {},
+      });
 
-      if (listError) {
-        console.error('List error:', listError);
-        throw listError;
+      if (error) {
+        console.error('Clear storage function error:', error);
+        throw error;
       }
 
-      console.log('Files found:', files);
-
-      // Filter out folders and get only files
-      const fileNames = (files || [])
-        .filter(file => file.name && !file.id?.includes('/'))
-        .map(file => file.name);
-
-      console.log('File names to delete:', fileNames);
-
-      // Delete all files from storage
-      if (fileNames.length > 0) {
-        const { error: deleteStorageError } = await supabase.storage
-          .from('issue-images')
-          .remove(fileNames);
-
-        if (deleteStorageError) {
-          console.error('Delete storage error:', deleteStorageError);
-          throw deleteStorageError;
-        }
-      }
-
-      // Delete all reports from the database
-      const { error: deleteReportsError } = await supabase
-        .from('reports')
-        .delete()
-        .neq('id', '00000000-0000-0000-0000-000000000000'); // Delete all (neq with impossible ID)
-
-      if (deleteReportsError) {
-        console.error('Delete reports error:', deleteReportsError);
-        throw deleteReportsError;
-      }
+      const deletedFiles = Number(data?.deletedFiles ?? 0);
+      const deletedReports = Number(data?.deletedReports ?? 0);
 
       // Refresh reports list and storage info
       setReports([]);
       setFilteredReports([]);
       setStorageInfo({ used: 0, fileCount: 0 });
+      void checkStorageUsage();
 
       toast({
         title: 'All Reports & Storage Cleared',
-        description: `Successfully cleared ${fileNames.length} files and all reports from the database.`,
+        description: `Deleted ${deletedFiles} images and ${deletedReports} reports.`,
       });
     } catch (error) {
       console.error('Clear storage error:', error);
       toast({
         title: 'Error',
-        description: 'Failed to clear storage and reports. Check console for details.',
+        description: 'Failed to clear storage and reports. Please try again.',
         variant: 'destructive',
       });
     }

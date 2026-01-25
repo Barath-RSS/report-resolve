@@ -16,7 +16,7 @@ import { supabase } from '@/integrations/supabase/client';
 import collegeLogo from '@/assets/college-logo.jpg';
 
 const emailSchema = z.string().email('Invalid email format').max(255);
-const passwordSchema = z.string().min(6, 'Password must be at least 6 characters').max(128);
+const passwordSchema = z.string().min(8, 'Use a stronger password (minimum 8 characters)').max(128);
 const nameSchema = z.string().min(2, 'Name must be at least 2 characters').max(100);
 const registerNoSchema = z.string().min(5, 'Register No must be at least 5 characters').max(20);
 const officialEmailSchema = z.string().email('Invalid email format').refine(
@@ -51,14 +51,24 @@ export default function AuthPage() {
   const { toast } = useToast();
 
   useEffect(() => {
-    if (!authLoading && user && role) {
-      if (role === 'official') {
-        navigate('/command-center');
-      } else {
+    if (authLoading) return;
+    if (!user || !role) return;
+
+    // IMPORTANT: If someone is attempting an official login but their backend role
+    // is not official (pending/rejected/etc), we should NOT redirect them into the
+    // student dashboard. The submit handler will sign them out + show the correct toast.
+    if (role === 'official') {
+      navigate('/command-center');
+      return;
+    }
+
+    if (role === 'student') {
+      if (userType === 'student') {
         navigate('/dashboard');
       }
+      // else: stay on /auth
     }
-  }, [user, role, authLoading, navigate]);
+  }, [user, role, authLoading, navigate, userType]);
 
   // Reset form when switching user type or auth mode
   useEffect(() => {
@@ -185,18 +195,24 @@ export default function AuthPage() {
           // Check the user's actual role
           const { data: { user: currentUser } } = await supabase.auth.getUser();
           if (currentUser) {
-            const { data: roleData } = await supabase
-              .from('user_roles')
-              .select('role')
-              .eq('user_id', currentUser.id)
-              .maybeSingle();
-            
-            if (!roleData || roleData.role !== 'official') {
+            const { data: isOfficial, error: roleCheckError } = await supabase.rpc('has_role', {
+              _user_id: currentUser.id,
+              _role: 'official',
+            });
+
+            if (roleCheckError) {
+              await supabase.auth.signOut();
+              throw new Error('Unable to verify official access right now. Please try again.');
+            }
+
+            if (!isOfficial) {
               // Check if they have a pending access request
               const { data: accessRequest } = await supabase
                 .from('access_requests')
                 .select('status')
                 .eq('user_id', currentUser.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
                 .maybeSingle();
               
               // Sign them out immediately to prevent redirect
@@ -208,8 +224,8 @@ export default function AuthPage() {
               } else if (accessRequest?.status === 'rejected') {
                 throw new Error('Your official access request was rejected. Please contact an administrator.');
               } else if (accessRequest?.status === 'approved') {
-                // This shouldn't happen as role should be updated on approval
-                throw new Error('Your request was approved but role was not updated. Please contact an administrator.');
+                // This can happen if their role update is still propagating or if there are duplicate role rows.
+                throw new Error('Your request was approved, but your official role is not active yet. Please try again in a minute.');
               } else {
                 throw new Error('You do not have official access. Please request official access first by signing up as an official.');
               }
@@ -578,6 +594,11 @@ export default function AuthPage() {
                 </div>
                 {errors.password && (
                   <p className="text-sm text-destructive">{errors.password}</p>
+                )}
+                {!errors.password && !isForgotPassword && !isLogin && (
+                  <p className="text-xs text-muted-foreground">
+                    Tip: Use at least 8 characters (mix letters and numbers).
+                  </p>
                 )}
                 {capsLock && (
                   <div className="flex items-center gap-2 text-sm text-warning">
