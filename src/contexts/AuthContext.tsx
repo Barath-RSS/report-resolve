@@ -24,18 +24,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchUserRole = async (userId: string) => {
-    const { data, error } = await supabase
-      .from('user_roles')
-      .select('role')
-      .eq('user_id', userId)
-      .maybeSingle();
-    
-    if (error) {
-      console.error('Error fetching user role:', error);
+    // Avoid maybeSingle() here because user_roles can temporarily contain
+    // multiple rows per user (e.g., student + official during transitions),
+    // which would cause a false-null role and break routing.
+    try {
+      const { data: isOfficial, error: officialError } = await supabase.rpc('has_role', {
+        _user_id: userId,
+        _role: 'official',
+      });
+      if (officialError) {
+        console.error('Error checking official role:', officialError);
+      }
+      if (isOfficial) return 'official';
+
+      const { data: isStudent, error: studentError } = await supabase.rpc('has_role', {
+        _user_id: userId,
+        _role: 'student',
+      });
+      if (studentError) {
+        console.error('Error checking student role:', studentError);
+      }
+      if (isStudent) return 'student';
+
+      return null;
+    } catch (e) {
+      console.error('Error fetching user role:', e);
       return null;
     }
-    
-    return data?.role as AppRole;
   };
 
   useEffect(() => {
