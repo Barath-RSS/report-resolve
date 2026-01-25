@@ -153,12 +153,30 @@ export default function Admin() {
       return;
     }
 
-    // If approved, update the user's role to official
+    // If approved, update the user's role to official (use upsert in case the row doesn't exist)
     if (action === 'approved') {
-      const { error: roleError } = await supabase
+      // First try to check if existing role exists
+      const { data: existingRole } = await supabase
         .from('user_roles')
-        .update({ role: 'official' })
-        .eq('user_id', userId);
+        .select('id')
+        .eq('user_id', userId)
+        .maybeSingle();
+      
+      let roleError = null;
+      if (existingRole) {
+        // Update existing role
+        const { error } = await supabase
+          .from('user_roles')
+          .update({ role: 'official' })
+          .eq('user_id', userId);
+        roleError = error;
+      } else {
+        // Insert new role
+        const { error } = await supabase
+          .from('user_roles')
+          .insert({ user_id: userId, role: 'official' });
+        roleError = error;
+      }
 
       if (roleError) {
         toast({
