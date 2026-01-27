@@ -365,7 +365,7 @@ export default function CommandCenter() {
     }
   };
 
-  // Export reports to PDF with embedded images
+  // Export reports to PDF with embedded images - optimized for space efficiency
   const exportToPdf = async () => {
     setExportingPdf(true);
     try {
@@ -387,65 +387,206 @@ export default function CommandCenter() {
       // Create PDF document
       const doc = new jsPDF();
       const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const margin = 10;
+      const contentWidth = pageWidth - margin * 2;
       
-      // Title
-      doc.setFontSize(20);
-      doc.text('Campus Connect - Incident Reports', pageWidth / 2, 20, { align: 'center' });
-      doc.setFontSize(10);
-      doc.text(`Generated on: ${new Date().toLocaleString()}`, pageWidth / 2, 28, { align: 'center' });
-      doc.text(`Total Reports: ${reports.length}`, pageWidth / 2, 34, { align: 'center' });
+      // Title header
+      doc.setFillColor(124, 29, 62); // Maroon color
+      doc.rect(0, 0, pageWidth, 25, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text('CAMPUS CONNECT - INCIDENT REPORTS', pageWidth / 2, 12, { align: 'center' });
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Generated: ${new Date().toLocaleString()} | Total: ${reports.length} reports`, pageWidth / 2, 20, { align: 'center' });
       
-      let yPosition = 45;
+      doc.setTextColor(0, 0, 0);
+      let yPosition = 32;
       
-      for (let i = 0; i < reports.length; i++) {
-        const report = reports[i];
+      // Two-column layout for reports without images
+      const reportsWithImages = reports.filter(r => r.image_url);
+      const reportsWithoutImages = reports.filter(r => !r.image_url);
+      
+      // Function to draw a compact report card
+      const drawCompactReport = (report: Report, x: number, y: number, width: number, index: number): number => {
+        const startY = y;
+        const padding = 3;
+        const lineHeight = 4;
         
-        // Check if we need a new page
-        if (yPosition > 250) {
-          doc.addPage();
-          yPosition = 20;
-        }
+        // Status color
+        const statusColors: Record<string, [number, number, number]> = {
+          pending: [245, 158, 11],
+          investigating: [124, 29, 62],
+          resolved: [34, 197, 94],
+        };
+        const statusColor = statusColors[report.status] || [128, 128, 128];
         
-        // Report header
-        doc.setFontSize(12);
+        // Report header with status indicator
+        doc.setFillColor(248, 248, 248);
+        doc.roundedRect(x, y, width, 8, 1, 1, 'F');
+        doc.setFillColor(...statusColor);
+        doc.roundedRect(x, y, 3, 8, 1, 1, 'F');
+        
+        doc.setFontSize(8);
         doc.setFont('helvetica', 'bold');
-        doc.text(`Report #${i + 1}: ${report.sub_category.replace(/_/g, ' ')}`, 14, yPosition);
-        yPosition += 7;
+        doc.setTextColor(60, 60, 60);
+        const title = `#${index + 1} ${report.sub_category.replace(/_/g, ' ').toUpperCase()}`;
+        doc.text(title.substring(0, 35), x + 5, y + 5);
         
-        // Report details
-        doc.setFontSize(9);
+        doc.setFontSize(6);
         doc.setFont('helvetica', 'normal');
+        doc.setTextColor(...statusColor);
+        doc.text(report.status.toUpperCase(), x + width - 3, y + 5, { align: 'right' });
         
-        const details = [
-          `Date: ${new Date(report.created_at).toLocaleString()}`,
-          `Category: ${report.category} / ${report.sub_category.replace(/_/g, ' ')}`,
-          `Status: ${report.status.toUpperCase()}`,
-          `Location: ${report.landmark || 'Not specified'}`,
-          `Submitter: ${(report.is_anonymous && report.category === 'personal') ? 'Anonymous' : (report.submitter_name || 'Unknown')}`,
-          `Register No: ${(report.is_anonymous && report.category === 'personal') ? 'N/A' : (report.submitter_register_no || 'N/A')}`,
+        y += 10;
+        doc.setTextColor(80, 80, 80);
+        doc.setFontSize(7);
+        
+        // Compact info rows
+        const infoRows = [
+          [`📅 ${new Date(report.created_at).toLocaleDateString()}`, `📍 ${(report.landmark || 'N/A').substring(0, 20)}`],
+          [`📁 ${report.category}`, `👤 ${(report.is_anonymous && report.category === 'personal') ? 'Anonymous' : (report.submitter_name || 'Unknown').substring(0, 15)}`],
         ];
         
-        details.forEach(detail => {
-          doc.text(detail, 14, yPosition);
-          yPosition += 5;
+        infoRows.forEach(row => {
+          doc.text(row[0], x + padding, y);
+          doc.text(row[1], x + width / 2, y);
+          y += lineHeight;
         });
         
-        // Description (with word wrap)
-        const descLines = doc.splitTextToSize(`Description: ${report.description}`, pageWidth - 28);
-        doc.text(descLines, 14, yPosition);
-        yPosition += descLines.length * 5;
+        // Description (compact)
+        doc.setFontSize(6.5);
+        doc.setTextColor(100, 100, 100);
+        const desc = report.description.substring(0, 120) + (report.description.length > 120 ? '...' : '');
+        const descLines = doc.splitTextToSize(desc, width - padding * 2);
+        doc.text(descLines.slice(0, 3), x + padding, y);
+        y += Math.min(descLines.length, 3) * 3.5;
         
+        // Official response if exists
         if (report.official_response) {
-          const responseLines = doc.splitTextToSize(`Official Response: ${report.official_response}`, pageWidth - 28);
-          doc.text(responseLines, 14, yPosition);
-          yPosition += responseLines.length * 5;
+          doc.setFillColor(230, 245, 230);
+          doc.rect(x + padding, y, width - padding * 2, 6, 'F');
+          doc.setFontSize(6);
+          doc.setTextColor(34, 120, 34);
+          const response = `✓ ${report.official_response.substring(0, 60)}${report.official_response.length > 60 ? '...' : ''}`;
+          doc.text(response, x + padding + 1, y + 4);
+          y += 8;
         }
         
-        // Add image if available
-        if (report.image_url) {
+        return y - startY + 2;
+      };
+      
+      // Draw reports without images in two columns
+      if (reportsWithoutImages.length > 0) {
+        const colWidth = (contentWidth - 4) / 2;
+        let col1Y = yPosition;
+        let col2Y = yPosition;
+        let useCol1 = true;
+        
+        reportsWithoutImages.forEach((report, idx) => {
+          const originalIndex = reports.indexOf(report);
+          
+          if (useCol1) {
+            if (col1Y > pageHeight - 40) {
+              doc.addPage();
+              col1Y = 15;
+              col2Y = 15;
+            }
+            const height = drawCompactReport(report, margin, col1Y, colWidth, originalIndex);
+            col1Y += height + 3;
+          } else {
+            if (col2Y > pageHeight - 40) {
+              // If col2 needs new page but col1 doesn't, continue on col1
+              if (col1Y < pageHeight - 40) {
+                const height = drawCompactReport(report, margin, col1Y, colWidth, originalIndex);
+                col1Y += height + 3;
+                return;
+              }
+              doc.addPage();
+              col1Y = 15;
+              col2Y = 15;
+            }
+            const height = drawCompactReport(report, margin + colWidth + 4, col2Y, colWidth, originalIndex);
+            col2Y += height + 3;
+          }
+          useCol1 = !useCol1;
+        });
+        
+        yPosition = Math.max(col1Y, col2Y) + 5;
+      }
+      
+      // Draw reports with images (full width for image display)
+      if (reportsWithImages.length > 0) {
+        if (yPosition > pageHeight - 80) {
+          doc.addPage();
+          yPosition = 15;
+        }
+        
+        // Section header for image reports
+        doc.setFillColor(240, 240, 240);
+        doc.rect(margin, yPosition, contentWidth, 7, 'F');
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(80, 80, 80);
+        doc.text(`📷 REPORTS WITH ATTACHMENTS (${reportsWithImages.length})`, margin + 3, yPosition + 5);
+        yPosition += 12;
+        
+        for (const report of reportsWithImages) {
+          const originalIndex = reports.indexOf(report);
+          
+          if (yPosition > pageHeight - 70) {
+            doc.addPage();
+            yPosition = 15;
+          }
+          
+          // Draw report info on left, image on right
+          const infoWidth = contentWidth * 0.55;
+          const imgWidth = contentWidth * 0.4;
+          const startY = yPosition;
+          
+          // Report info
+          doc.setFillColor(248, 248, 248);
+          doc.roundedRect(margin, yPosition, infoWidth, 50, 2, 2, 'F');
+          
+          // Status bar
+          const statusColors: Record<string, [number, number, number]> = {
+            pending: [245, 158, 11],
+            investigating: [124, 29, 62],
+            resolved: [34, 197, 94],
+          };
+          doc.setFillColor(...(statusColors[report.status] || [128, 128, 128]));
+          doc.roundedRect(margin, yPosition, 3, 50, 1, 1, 'F');
+          
+          let infoY = yPosition + 6;
+          doc.setFontSize(9);
+          doc.setFont('helvetica', 'bold');
+          doc.setTextColor(60, 60, 60);
+          doc.text(`#${originalIndex + 1} ${report.sub_category.replace(/_/g, ' ').toUpperCase()}`, margin + 6, infoY);
+          
+          doc.setFontSize(7);
+          doc.setFont('helvetica', 'normal');
+          doc.setTextColor(...(statusColors[report.status] || [128, 128, 128]));
+          doc.text(report.status.toUpperCase(), margin + infoWidth - 3, infoY, { align: 'right' });
+          
+          infoY += 6;
+          doc.setTextColor(80, 80, 80);
+          doc.text(`📅 ${new Date(report.created_at).toLocaleString()}`, margin + 6, infoY);
+          infoY += 5;
+          doc.text(`📍 ${(report.landmark || 'Not specified').substring(0, 40)}`, margin + 6, infoY);
+          infoY += 5;
+          doc.text(`👤 ${(report.is_anonymous && report.category === 'personal') ? 'Anonymous' : (report.submitter_name || 'Unknown')}`, margin + 6, infoY);
+          infoY += 5;
+          
+          doc.setFontSize(6.5);
+          doc.setTextColor(100, 100, 100);
+          const descLines = doc.splitTextToSize(report.description, infoWidth - 12);
+          doc.text(descLines.slice(0, 4), margin + 6, infoY);
+          
+          // Image on right
           try {
-            // Fetch image and convert to base64
-            const response = await fetch(report.image_url);
+            const response = await fetch(report.image_url!);
             const blob = await response.blob();
             const base64 = await new Promise<string>((resolve) => {
               const reader = new FileReader();
@@ -453,37 +594,35 @@ export default function CommandCenter() {
               reader.readAsDataURL(blob);
             });
             
-            // Check if we need a new page for image
-            if (yPosition > 200) {
-              doc.addPage();
-              yPosition = 20;
-            }
-            
-            // Add image to PDF
-            doc.addImage(base64, 'JPEG', 14, yPosition, 80, 60);
-            yPosition += 65;
+            doc.addImage(base64, 'JPEG', margin + infoWidth + 4, startY, imgWidth, 50);
           } catch (imgError) {
             console.error('Failed to load image:', imgError);
-            doc.text(`[Image unavailable: ${report.image_url}]`, 14, yPosition);
-            yPosition += 5;
+            doc.setFillColor(230, 230, 230);
+            doc.roundedRect(margin + infoWidth + 4, startY, imgWidth, 50, 2, 2, 'F');
+            doc.setFontSize(8);
+            doc.setTextColor(150, 150, 150);
+            doc.text('Image unavailable', margin + infoWidth + imgWidth / 2 + 4, startY + 25, { align: 'center' });
           }
+          
+          yPosition = startY + 55;
         }
-        
-        yPosition += 10; // Space between reports
-        
-        // Draw separator line
-        if (i < reports.length - 1) {
-          doc.setDrawColor(200);
-          doc.line(14, yPosition - 5, pageWidth - 14, yPosition - 5);
-        }
+      }
+      
+      // Footer on last page
+      const totalPages = doc.internal.pages.length - 1;
+      for (let i = 1; i <= totalPages; i++) {
+        doc.setPage(i);
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        doc.text(`Page ${i} of ${totalPages} | Campus Connect - Sathyabama University`, pageWidth / 2, pageHeight - 5, { align: 'center' });
       }
       
       // Save the PDF
       doc.save(`campus_connect_reports_${new Date().toISOString().split('T')[0]}.pdf`);
       
       toast({
-        title: 'Export Successful',
-        description: `${reports.length} reports have been exported to PDF with images.`,
+        title: '✅ Export Successful',
+        description: `${reports.length} reports exported to PDF.`,
       });
     } catch (error) {
       console.error('Export error:', error);
@@ -583,15 +722,18 @@ export default function CommandCenter() {
   };
 
   return (
-    <PageTransition className="min-h-screen bg-background">
+    <PageTransition className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-border bg-background/80 backdrop-blur-xl">
+      <header className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-xl shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center shadow-md">
               <LayoutDashboard className="w-5 h-5 text-primary-foreground" />
             </div>
-            <h1 className="text-xl font-bold text-foreground">Campus Connect</h1>
+            <div>
+              <h1 className="text-lg font-bold text-foreground">Campus Connect</h1>
+              <p className="text-xs text-muted-foreground hidden sm:block">Command Center</p>
+            </div>
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             {/* Notifications */}
@@ -679,7 +821,7 @@ export default function CommandCenter() {
               </PopoverContent>
             </Popover>
             <ThemeToggle />
-            <Button variant="outline" size="sm" onClick={signOut}>
+            <Button variant="outline" size="sm" onClick={signOut} className="hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-colors">
               <span className="hidden sm:inline">Sign Out</span>
               <span className="sm:hidden">Exit</span>
             </Button>

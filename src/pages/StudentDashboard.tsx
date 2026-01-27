@@ -315,33 +315,40 @@ export default function StudentDashboard() {
   };
 
   return (
-    <PageTransition className="min-h-screen bg-background">
+    <PageTransition className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
       {/* Header */}
-      <header className="sticky top-0 z-50 border-b border-border bg-card shadow-sm">
+      <header className="sticky top-0 z-50 border-b border-border/50 bg-background/80 backdrop-blur-xl shadow-sm">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-lg gradient-primary flex items-center justify-center">
+            <div className="w-10 h-10 rounded-xl gradient-primary flex items-center justify-center shadow-md">
               <FileText className="w-5 h-5 text-primary-foreground" />
             </div>
-            <h1 className="text-lg font-bold text-foreground">Campus Connect</h1>
+            <div>
+              <h1 className="text-lg font-bold text-foreground">Campus Connect</h1>
+              <p className="text-xs text-muted-foreground hidden sm:block">Report Campus Issues</p>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 sm:gap-3">
             <Button
-              variant={showMyReports ? "default" : "ghost"}
+              variant={showMyReports ? "default" : "outline"}
               size="sm"
               onClick={() => setShowMyReports(!showMyReports)}
-              className="relative"
+              className={`relative ${showMyReports ? 'shadow-md' : ''}`}
             >
               <FileText className="w-4 h-4 mr-1.5" />
               <span className="hidden sm:inline">My Reports</span>
               {reports.length > 0 && (
-                <span className="ml-1.5 px-1.5 py-0.5 rounded-full bg-primary-foreground text-primary text-xs font-medium">
+                <span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-xs font-semibold ${
+                  showMyReports 
+                    ? 'bg-primary-foreground text-primary' 
+                    : 'bg-primary text-primary-foreground'
+                }`}>
                   {reports.length}
                 </span>
               )}
             </Button>
             <ThemeToggle />
-            <Button variant="outline" size="sm" onClick={signOut}>
+            <Button variant="outline" size="sm" onClick={signOut} className="hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-colors">
               <span className="hidden sm:inline">Sign Out</span>
               <span className="sm:hidden">Exit</span>
             </Button>
