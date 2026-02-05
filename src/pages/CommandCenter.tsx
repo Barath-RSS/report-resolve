@@ -409,11 +409,41 @@ export default function CommandCenter() {
       const reportsWithImages = reports.filter(r => r.image_url);
       const reportsWithoutImages = reports.filter(r => !r.image_url);
       
+      // Helper to safely get text (no null/undefined)
+      const safeText = (val: string | null | undefined, fallback: string = 'N/A'): string => {
+        if (val === null || val === undefined || val.trim() === '') return fallback;
+        return val.trim();
+      };
+      
+      // Format date and time separately
+      const formatDate = (dateStr: string): string => {
+        try {
+          return new Date(dateStr).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        } catch { return 'N/A'; }
+      };
+      
+      const formatTime = (dateStr: string): string => {
+        try {
+          return new Date(dateStr).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+        } catch { return 'N/A'; }
+      };
+      
+      // Get submitter display name
+      const getSubmitterName = (report: Report): string => {
+        if (report.is_anonymous && report.category === 'personal') return 'Anonymous';
+        const name = safeText(report.submitter_name, '');
+        const regNo = safeText(report.submitter_register_no, '');
+        if (name && regNo) return `${name} (${regNo})`;
+        if (name) return name;
+        if (regNo) return regNo;
+        return 'Unknown';
+      };
+      
       // Function to draw a compact report card
       const drawCompactReport = (report: Report, x: number, y: number, width: number, index: number): number => {
         const startY = y;
-        const padding = 3;
-        const lineHeight = 4;
+        const padding = 4;
+        const lineHeight = 4.5;
         
         // Status color
         const statusColors: Record<string, [number, number, number]> = {
@@ -432,45 +462,70 @@ export default function CommandCenter() {
         doc.setFontSize(8);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(60, 60, 60);
-        const title = `#${index + 1} ${report.sub_category.replace(/_/g, ' ').toUpperCase()}`;
+        const subCat = safeText(report.sub_category, 'Report').replace(/_/g, ' ').toUpperCase();
+        const title = `#${index + 1} ${subCat}`;
         doc.text(title.substring(0, 35), x + 5, y + 5);
         
         doc.setFontSize(6);
         doc.setFont('helvetica', 'normal');
         doc.setTextColor(...statusColor);
-        doc.text(report.status.toUpperCase(), x + width - 3, y + 5, { align: 'right' });
+        doc.text(safeText(report.status, 'pending').toUpperCase(), x + width - 3, y + 5, { align: 'right' });
         
         y += 10;
         doc.setTextColor(80, 80, 80);
         doc.setFontSize(7);
         
-        // Compact info rows
-        const infoRows = [
-          [`📅 ${new Date(report.created_at).toLocaleDateString()}`, `📍 ${(report.landmark || 'N/A').substring(0, 20)}`],
-          [`📁 ${report.category}`, `👤 ${(report.is_anonymous && report.category === 'personal') ? 'Anonymous' : (report.submitter_name || 'Unknown').substring(0, 15)}`],
-        ];
+        // Compact info rows with all details
+        doc.setFont('helvetica', 'bold');
+        doc.text('Submitted By:', x + padding, y);
+        doc.setFont('helvetica', 'normal');
+        doc.text(getSubmitterName(report).substring(0, 25), x + padding + 22, y);
+        y += lineHeight;
         
-        infoRows.forEach(row => {
-          doc.text(row[0], x + padding, y);
-          doc.text(row[1], x + width / 2, y);
-          y += lineHeight;
-        });
+        doc.setFont('helvetica', 'bold');
+        doc.text('Date:', x + padding, y);
+        doc.setFont('helvetica', 'normal');
+        doc.text(formatDate(report.created_at), x + padding + 10, y);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Time:', x + width / 2, y);
+        doc.setFont('helvetica', 'normal');
+        doc.text(formatTime(report.created_at), x + width / 2 + 10, y);
+        y += lineHeight;
         
-        // Description (compact)
+        doc.setFont('helvetica', 'bold');
+        doc.text('Category:', x + padding, y);
+        doc.setFont('helvetica', 'normal');
+        const category = safeText(report.category, 'General');
+        doc.text(category.charAt(0).toUpperCase() + category.slice(1), x + padding + 16, y);
+        y += lineHeight;
+        
+        doc.setFont('helvetica', 'bold');
+        doc.text('Location:', x + padding, y);
+        doc.setFont('helvetica', 'normal');
+        doc.text(safeText(report.landmark, 'Not specified').substring(0, 30), x + padding + 15, y);
+        y += lineHeight;
+        
+        // Description
+        doc.setFont('helvetica', 'bold');
+        doc.text('Description:', x + padding, y);
+        y += lineHeight;
         doc.setFontSize(6.5);
+        doc.setFont('helvetica', 'normal');
         doc.setTextColor(100, 100, 100);
-        const desc = report.description.substring(0, 120) + (report.description.length > 120 ? '...' : '');
-        const descLines = doc.splitTextToSize(desc, width - padding * 2);
+        const desc = safeText(report.description, 'No description provided');
+        const descTruncated = desc.substring(0, 150) + (desc.length > 150 ? '...' : '');
+        const descLines = doc.splitTextToSize(descTruncated, width - padding * 2);
         doc.text(descLines.slice(0, 3), x + padding, y);
         y += Math.min(descLines.length, 3) * 3.5;
         
         // Official response if exists
-        if (report.official_response) {
+        if (report.official_response && report.official_response.trim()) {
+          y += 1;
           doc.setFillColor(230, 245, 230);
           doc.rect(x + padding, y, width - padding * 2, 6, 'F');
           doc.setFontSize(6);
           doc.setTextColor(34, 120, 34);
-          const response = `✓ ${report.official_response.substring(0, 60)}${report.official_response.length > 60 ? '...' : ''}`;
+          const response = 'Response: ' + report.official_response.substring(0, 55) + (report.official_response.length > 55 ? '...' : '');
           doc.text(response, x + padding + 1, y + 4);
           y += 8;
         }
@@ -546,9 +601,10 @@ export default function CommandCenter() {
           const imgWidth = contentWidth * 0.4;
           const startY = yPosition;
           
-          // Report info
+          // Report info card
+          const cardHeight = 55;
           doc.setFillColor(248, 248, 248);
-          doc.roundedRect(margin, yPosition, infoWidth, 50, 2, 2, 'F');
+          doc.roundedRect(margin, yPosition, infoWidth, cardHeight, 2, 2, 'F');
           
           // Status bar
           const statusColors: Record<string, [number, number, number]> = {
@@ -557,32 +613,70 @@ export default function CommandCenter() {
             resolved: [34, 197, 94],
           };
           doc.setFillColor(...(statusColors[report.status] || [128, 128, 128]));
-          doc.roundedRect(margin, yPosition, 3, 50, 1, 1, 'F');
+          doc.roundedRect(margin, yPosition, 3, cardHeight, 1, 1, 'F');
           
           let infoY = yPosition + 6;
+          const leftPad = margin + 6;
+          
+          // Header
           doc.setFontSize(9);
           doc.setFont('helvetica', 'bold');
           doc.setTextColor(60, 60, 60);
-          doc.text(`#${originalIndex + 1} ${report.sub_category.replace(/_/g, ' ').toUpperCase()}`, margin + 6, infoY);
+          const subCatImg = safeText(report.sub_category, 'Report').replace(/_/g, ' ').toUpperCase();
+          doc.text(`#${originalIndex + 1} ${subCatImg}`, leftPad, infoY);
           
           doc.setFontSize(7);
           doc.setFont('helvetica', 'normal');
           doc.setTextColor(...(statusColors[report.status] || [128, 128, 128]));
-          doc.text(report.status.toUpperCase(), margin + infoWidth - 3, infoY, { align: 'right' });
+          doc.text(safeText(report.status, 'pending').toUpperCase(), margin + infoWidth - 5, infoY, { align: 'right' });
           
-          infoY += 6;
+          infoY += 7;
           doc.setTextColor(80, 80, 80);
-          doc.text(`📅 ${new Date(report.created_at).toLocaleString()}`, margin + 6, infoY);
-          infoY += 5;
-          doc.text(`📍 ${(report.landmark || 'Not specified').substring(0, 40)}`, margin + 6, infoY);
-          infoY += 5;
-          doc.text(`👤 ${(report.is_anonymous && report.category === 'personal') ? 'Anonymous' : (report.submitter_name || 'Unknown')}`, margin + 6, infoY);
+          doc.setFontSize(7);
+          
+          // Submitted By
+          doc.setFont('helvetica', 'bold');
+          doc.text('Submitted By:', leftPad, infoY);
+          doc.setFont('helvetica', 'normal');
+          doc.text(getSubmitterName(report).substring(0, 30), leftPad + 22, infoY);
           infoY += 5;
           
+          // Date & Time
+          doc.setFont('helvetica', 'bold');
+          doc.text('Date:', leftPad, infoY);
+          doc.setFont('helvetica', 'normal');
+          doc.text(formatDate(report.created_at), leftPad + 10, infoY);
+          doc.setFont('helvetica', 'bold');
+          doc.text('Time:', leftPad + 40, infoY);
+          doc.setFont('helvetica', 'normal');
+          doc.text(formatTime(report.created_at), leftPad + 50, infoY);
+          infoY += 5;
+          
+          // Category
+          doc.setFont('helvetica', 'bold');
+          doc.text('Category:', leftPad, infoY);
+          doc.setFont('helvetica', 'normal');
+          const catImg = safeText(report.category, 'General');
+          doc.text(catImg.charAt(0).toUpperCase() + catImg.slice(1), leftPad + 16, infoY);
+          infoY += 5;
+          
+          // Location
+          doc.setFont('helvetica', 'bold');
+          doc.text('Location:', leftPad, infoY);
+          doc.setFont('helvetica', 'normal');
+          doc.text(safeText(report.landmark, 'Not specified').substring(0, 35), leftPad + 15, infoY);
+          infoY += 5;
+          
+          // Description
+          doc.setFont('helvetica', 'bold');
+          doc.text('Description:', leftPad, infoY);
+          infoY += 4;
           doc.setFontSize(6.5);
+          doc.setFont('helvetica', 'normal');
           doc.setTextColor(100, 100, 100);
-          const descLines = doc.splitTextToSize(report.description, infoWidth - 12);
-          doc.text(descLines.slice(0, 4), margin + 6, infoY);
+          const descImg = safeText(report.description, 'No description');
+          const descLines = doc.splitTextToSize(descImg.substring(0, 180), infoWidth - 12);
+          doc.text(descLines.slice(0, 3), leftPad, infoY);
           
           // Image on right
           try {
@@ -604,7 +698,7 @@ export default function CommandCenter() {
             doc.text('Image unavailable', margin + infoWidth + imgWidth / 2 + 4, startY + 25, { align: 'center' });
           }
           
-          yPosition = startY + 55;
+          yPosition = startY + cardHeight + 5;
         }
       }
       
