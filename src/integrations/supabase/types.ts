@@ -113,6 +113,7 @@ export type Database = {
       reports: {
         Row: {
           category: string
+          completion_image_url: string | null
           created_at: string
           description: string
           id: string
@@ -130,6 +131,7 @@ export type Database = {
         }
         Insert: {
           category: string
+          completion_image_url?: string | null
           created_at?: string
           description: string
           id?: string
@@ -147,6 +149,7 @@ export type Database = {
         }
         Update: {
           category?: string
+          completion_image_url?: string | null
           created_at?: string
           description?: string
           id?: string
@@ -203,7 +206,7 @@ export type Database = {
       }
     }
     Enums: {
-      app_role: "student" | "official"
+      app_role: "student" | "official" | "staff"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -331,7 +334,7 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
-      app_role: ["student", "official"],
+      app_role: ["student", "official", "staff"],
     },
   },
 } as const
