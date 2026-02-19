@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { z } from 'zod';
-import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User, LayoutDashboard, Command, FileText, Hash, GraduationCap, Briefcase, KeyRound, ArrowLeft, CheckCircle2, Sparkles } from 'lucide-react';
+import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User, LayoutDashboard, Command, FileText, Hash, GraduationCap, Briefcase, KeyRound, ArrowLeft, CheckCircle2, Sparkles, Wrench } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
@@ -29,7 +29,7 @@ const studentEmailSchema = z.string().email('Invalid email format').refine(
   { message: 'Students should use personal email (not @sathyabama.ac.in)' }
 );
 
-type UserType = 'student' | 'official';
+type UserType = 'student' | 'official' | 'staff';
 type ResetStep = 'email' | 'otp' | 'newPassword' | 'success';
 
 export default function AuthPage() {
@@ -53,25 +53,31 @@ export default function AuthPage() {
   const [officialRequestSubmitted, setOfficialRequestSubmitted] = useState(false);
 
   const { signIn, signUp, user, role, loading: authLoading } = useAuth();
-  const { theme } = useTheme();
   const navigate = useNavigate();
+  // cast role to include staff for type narrowing
+  const typedRole = role as 'student' | 'official' | 'staff' | null;
   const { toast } = useToast();
 
   useEffect(() => {
     if (authLoading) return;
-    if (!user || !role) return;
+    if (!user || !typedRole) return;
 
-    if (role === 'official') {
+    if (typedRole === 'official') {
       navigate('/command-center');
       return;
     }
 
-    if (role === 'student') {
+    if (typedRole === 'staff') {
+      navigate('/staff-dashboard');
+      return;
+    }
+
+    if (typedRole === 'student') {
       if (userType === 'student') {
         navigate('/dashboard');
       }
     }
-  }, [user, role, authLoading, navigate, userType]);
+  }, [user, typedRole, authLoading, navigate, userType]);
 
   // Reset form when switching user type or auth mode
   useEffect(() => {
@@ -303,27 +309,55 @@ export default function AuthPage() {
               await supabase.auth.signOut();
               
               if (accessRequest?.status === 'pending') {
-                throw new Error('Your official access request is still pending approval. Please wait for an administrator to approve your request.');
+                throw new Error('Your official access request is still pending approval.');
               } else if (accessRequest?.status === 'rejected') {
                 throw new Error('Your official access request was rejected. Please contact an administrator.');
-              } else if (accessRequest?.status === 'approved') {
-                throw new Error('Your request was approved, but your official role is not active yet. Please try again in a minute.');
               } else {
                 throw new Error('You do not have official access. Please request official access first by signing up as an official.');
               }
             }
             
-            toast({
-              title: '🎉 Welcome back!',
-              description: 'Signing you in to Command Center...',
-            });
+            toast({ title: '🎉 Welcome back!', description: 'Signing you in to Command Center...' });
+            return;
+          }
+        } else if (userType === 'staff') {
+          await new Promise(resolve => setTimeout(resolve, 300));
+          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          if (currentUser) {
+            // Check if user has staff role
+            const { data: staffRows } = await supabase
+              .from('user_roles')
+              .select('role')
+              .eq('user_id', currentUser.id)
+              .eq('role', 'staff' as any);
+            
+            const isStaff = staffRows && staffRows.length > 0;
+
+            if (!isStaff) {
+              const { data: accessRequest } = await supabase
+                .from('access_requests')
+                .select('status')
+                .eq('user_id', currentUser.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              
+              await supabase.auth.signOut();
+              
+              if (accessRequest?.status === 'pending') {
+                throw new Error('Your staff access request is still pending admin approval.');
+              } else if (accessRequest?.status === 'rejected') {
+                throw new Error('Your staff access request was rejected. Please contact an administrator.');
+              } else {
+                throw new Error('You do not have staff access. Please sign up as Service Staff first.');
+              }
+            }
+            
+            toast({ title: '🎉 Welcome back!', description: 'Signing you in to Staff Portal...' });
             return;
           }
         } else {
-          toast({
-            title: '🎉 Welcome back!',
-            description: 'Signing you in...',
-          });
+          toast({ title: '🎉 Welcome back!', description: 'Signing you in...' });
         }
       } else {
         const formattedRegisterNo = userType === 'student' ? registerNo.trim().toUpperCase() : null;
@@ -352,14 +386,16 @@ export default function AuthPage() {
           throw error;
         }
         
-        if (userType === 'official' && data?.user) {
+        if ((userType === 'official' || userType === 'staff') && data?.user) {
           const { error: requestError } = await supabase
             .from('access_requests')
             .insert({
               user_id: data.user.id,
               full_name: fullName,
               email: email,
-              reason: accessRequestReason || 'Official access request',
+              reason: userType === 'staff' 
+                ? `[Service Staff] ${accessRequestReason || 'Service staff access request'}`
+                : accessRequestReason || 'Official access request',
               status: 'pending'
             });
           
@@ -466,7 +502,7 @@ export default function AuthPage() {
               Request Submitted!
             </h1>
             <p className="text-muted-foreground mb-8">
-              Your request for official access has been submitted successfully. 
+              Your request for {userType === 'staff' ? 'service staff' : 'official'} access has been submitted successfully. 
               An administrator will review and approve your request. 
               You will be able to log in once your access is approved.
             </p>
@@ -774,30 +810,42 @@ export default function AuthPage() {
           </div>
 
           {/* User Type Selector */}
-          <div className="flex gap-3 mb-6">
+          <div className="flex gap-2 mb-6">
             <button
               type="button"
               onClick={() => setUserType('student')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl border-2 transition-all duration-200 ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-2 rounded-xl border-2 transition-all duration-200 ${
                 userType === 'student'
                   ? 'border-primary bg-primary/10 text-primary shadow-md'
-                  : 'border-border bg-muted/30 text-muted-foreground hover:border-primary/50 hover:bg-muted/50'
+                  : 'border-border bg-muted/30 text-muted-foreground hover:border-primary/50'
               }`}
             >
-              <GraduationCap className="w-5 h-5" />
-              <span className="text-sm font-medium">Student</span>
+              <GraduationCap className="w-4 h-4" />
+              <span className="text-xs font-medium">Student</span>
             </button>
             <button
               type="button"
               onClick={() => setUserType('official')}
-              className={`flex-1 flex items-center justify-center gap-2 py-3.5 px-4 rounded-xl border-2 transition-all duration-200 ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-2 rounded-xl border-2 transition-all duration-200 ${
                 userType === 'official'
                   ? 'border-primary bg-primary/10 text-primary shadow-md'
-                  : 'border-border bg-muted/30 text-muted-foreground hover:border-primary/50 hover:bg-muted/50'
+                  : 'border-border bg-muted/30 text-muted-foreground hover:border-primary/50'
               }`}
             >
-              <Briefcase className="w-5 h-5" />
-              <span className="text-sm font-medium">Official</span>
+              <Briefcase className="w-4 h-4" />
+              <span className="text-xs font-medium">Official</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setUserType('staff')}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-3 px-2 rounded-xl border-2 transition-all duration-200 ${
+                userType === 'staff'
+                  ? 'border-primary bg-primary/10 text-primary shadow-md'
+                  : 'border-border bg-muted/30 text-muted-foreground hover:border-primary/50'
+              }`}
+            >
+              <Wrench className="w-4 h-4" />
+              <span className="text-xs font-medium">Staff</span>
             </button>
           </div>
 
@@ -810,7 +858,9 @@ export default function AuthPage() {
               exit={{ opacity: 0, y: 10 }}
               className={`flex items-center gap-3 p-4 rounded-xl border-2 mb-6 ${
                 userType === 'official' 
-                  ? 'bg-gradient-to-r from-primary/10 to-primary/5 border-primary/30' 
+                  ? 'bg-gradient-to-r from-primary/10 to-primary/5 border-primary/30'
+                  : userType === 'staff'
+                  ? 'bg-gradient-to-r from-warning/10 to-warning/5 border-warning/30'
                   : 'bg-gradient-to-r from-muted/50 to-muted/30 border-border'
               }`}
             >
@@ -823,6 +873,18 @@ export default function AuthPage() {
                     <p className="text-sm font-semibold text-foreground">Command Center</p>
                     <p className="text-xs text-muted-foreground truncate">
                       {isLogin ? 'Login with @sathyabama.ac.in email' : 'Use official email to register'}
+                    </p>
+                  </div>
+                </>
+              ) : userType === 'staff' ? (
+                <>
+                  <div className="w-10 h-10 rounded-lg bg-warning/20 flex items-center justify-center flex-shrink-0">
+                    <Wrench className="w-5 h-5 text-warning" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">Service Staff Portal</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {isLogin ? 'Login with your personal email' : 'Request staff access (admin approval required)'}
                     </p>
                   </div>
                 </>
@@ -870,7 +932,7 @@ export default function AuthPage() {
             )}
 
             {/* Email Field */}
-            {(userType === 'official' || !isLogin) && (
+            {(userType === 'official' || userType === 'staff' || !isLogin) && (
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-sm font-medium">
                   {userType === 'official' ? 'Official Email' : 'Email'}

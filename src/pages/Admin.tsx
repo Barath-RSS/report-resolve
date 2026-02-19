@@ -19,7 +19,7 @@ interface UserWithRole {
   user_id: string;
   email: string | null;
   full_name: string | null;
-  role: 'student' | 'official';
+  role: 'student' | 'official' | 'staff';
   created_at: string;
 }
 
@@ -105,7 +105,7 @@ export default function Admin() {
     setLoading(false);
   };
 
-  const updateUserRole = async (userId: string, newRole: 'student' | 'official') => {
+  const updateUserRole = async (userId: string, newRole: 'student' | 'official' | 'staff') => {
     setUpdating(userId);
 
     const { error } = await supabase
@@ -153,45 +153,46 @@ export default function Admin() {
       return;
     }
 
-    // If approved, update the user's role to official (use upsert in case the row doesn't exist)
+    // If approved, update the user's role (detect if staff or official from request reason)
     if (action === 'approved') {
-      // Update first (handles duplicates safely); if nothing updated, insert.
+      const approvedRequest = accessRequests.find(r => r.id === requestId);
+      const isStaffRequest = approvedRequest?.reason?.startsWith('[Service Staff]');
+      const newRole = isStaffRequest ? 'staff' : 'official';
+
       const { data: updatedRoles, error: updateRoleError } = await supabase
         .from('user_roles')
-        .update({ role: 'official' })
+        .update({ role: newRole as any })
         .eq('user_id', userId)
         .select('id');
 
-      let roleError = updateRoleError;
+      if (updateRoleError) {
+        toast({ title: 'Error', description: 'Failed to process the request.', variant: 'destructive' });
+        setProcessingRequest(null);
+        return;
+      }
 
-      if (!roleError && (!updatedRoles || updatedRoles.length === 0)) {
-        const { error } = await supabase
+      if (!updatedRoles || updatedRoles.length === 0) {
+        const { error: insertError } = await supabase
           .from('user_roles')
-          .insert({ user_id: userId, role: 'official' });
-        roleError = error;
+          .insert({ user_id: userId, role: newRole as any });
+
+        if (insertError) {
+          toast({ title: 'Error', description: 'Failed to process the request.', variant: 'destructive' });
+          setProcessingRequest(null);
+          return;
+        }
       }
 
-      if (roleError) {
-        toast({
-          title: 'Error',
-          description: 'Failed to update user role.',
-          variant: 'destructive',
-        });
-      } else {
-        toast({
-          title: 'Request Approved',
-          description: 'User has been granted official access.',
-        });
-        fetchUsers();
-      }
-    } else {
       toast({
-        title: 'Request Rejected',
-        description: 'The access request has been rejected.',
+        title: 'Request Approved',
+        description: `User has been granted ${isStaffRequest ? 'service staff' : 'official'} access.`,
       });
+    } else {
+      toast({ title: 'Request Rejected', description: 'The access request has been rejected.' });
     }
 
     fetchAccessRequests();
+    fetchUsers();
     setProcessingRequest(null);
   };
 

@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from 'react
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
-type AppRole = 'student' | 'official' | null;
+type AppRole = 'student' | 'official' | 'staff' | null;
 
 interface AuthContextType {
   user: User | null;
@@ -24,27 +24,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchUserRole = async (userId: string) => {
-    // Avoid maybeSingle() here because user_roles can temporarily contain
-    // multiple rows per user (e.g., student + official during transitions),
-    // which would cause a false-null role and break routing.
     try {
       const { data: isOfficial, error: officialError } = await supabase.rpc('has_role', {
         _user_id: userId,
         _role: 'official',
       });
-      if (officialError) {
-        console.error('Error checking official role:', officialError);
-      }
-      if (isOfficial) return 'official';
+      if (officialError) console.error('Error checking official role:', officialError);
+      if (isOfficial) return 'official' as AppRole;
+
+      // Check staff role via user_roles table directly (since has_role enum may not include 'staff' yet in types)
+      const { data: staffRows } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', userId)
+        .eq('role', 'staff' as any);
+      if (staffRows && staffRows.length > 0) return 'staff' as AppRole;
 
       const { data: isStudent, error: studentError } = await supabase.rpc('has_role', {
         _user_id: userId,
         _role: 'student',
       });
-      if (studentError) {
-        console.error('Error checking student role:', studentError);
-      }
-      if (isStudent) return 'student';
+      if (studentError) console.error('Error checking student role:', studentError);
+      if (isStudent) return 'student' as AppRole;
 
       return null;
     } catch (e) {

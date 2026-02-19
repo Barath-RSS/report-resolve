@@ -754,8 +754,8 @@ export default function CommandCenter() {
       void checkStorageUsage();
 
       toast({
-        title: 'All Reports & Storage Cleared',
-        description: `Deleted ${deletedFiles} images and ${deletedReports} reports.`,
+        title: '✅ Resolved Reports Cleared',
+        description: `Deleted ${deletedFiles} images and ${deletedReports} resolved reports. Active reports remain.`,
       });
     } catch (error) {
       console.error('Clear storage error:', error);
@@ -986,16 +986,17 @@ export default function CommandCenter() {
                 <AlertDialogTrigger asChild>
                   <Button variant="outline" className="text-destructive border-destructive/30 hover:bg-destructive/10">
                     <Database className="w-4 h-4 mr-2" />
-                    Clear Reports
+                    Clear Resolved
                   </Button>
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Clear All Reports & Storage?</AlertDialogTitle>
+                    <AlertDialogTitle>Clear Resolved Reports?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      This will permanently delete all reports from the database AND all images from cloud storage. 
+                      This will permanently delete all <strong>resolved</strong> reports and their images from storage. 
+                      Pending and investigating reports will remain untouched.
                       <span className="block mt-2 font-medium text-warning">
-                        Would you like to download the reports first?
+                        Would you like to download all reports first?
                       </span>
                     </AlertDialogDescription>
                   </AlertDialogHeader>
@@ -1015,7 +1016,7 @@ export default function CommandCenter() {
                       ) : (
                         <Trash2 className="w-4 h-4 mr-2" />
                       )}
-                      Clear All
+                      Clear Resolved Only
                     </AlertDialogAction>
                   </AlertDialogFooter>
                 </AlertDialogContent>

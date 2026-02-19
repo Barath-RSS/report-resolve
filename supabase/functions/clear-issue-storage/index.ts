@@ -1,4 +1,5 @@
-// Clears all report records and deletes all files from the `issue-images` bucket.
+// Clears ONLY resolved report records and their associated images from the `issue-images` bucket.
+// Other reports (pending, investigating) remain untouched.
 // Protected: only users with the `official` role can execute.
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
@@ -8,12 +9,6 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
-
-type StorageItem = {
-  name: string;
-  id?: string;
-  metadata?: Record<string, unknown> | null;
 };
 
 function json(status: number, body: unknown) {
@@ -55,7 +50,7 @@ serve(async (req) => {
 
     const userId = claimsData.claims.sub;
 
-    // Elevated client to delete storage objects + reports
+    // Elevated client
     const admin = createClient(url, serviceKey, { auth: { persistSession: false } });
 
     // Authorize: must be official
@@ -68,75 +63,60 @@ serve(async (req) => {
     const isOfficial = (roles ?? []).some((r) => (r as { role?: string }).role === "official");
     if (!isOfficial) return json(403, { error: "Forbidden" });
 
-    // Recursively collect all file paths
-    const bucket = admin.storage.from("issue-images");
+    // Fetch all RESOLVED reports to get their image URLs
+    const { data: resolvedReports, error: fetchError } = await admin
+      .from("reports")
+      .select("id, image_url, completion_image_url")
+      .eq("status", "resolved");
 
-    const collectPaths = async (prefix = ""): Promise<string[]> => {
-      const paths: string[] = [];
-      let offset = 0;
-      const limit = 1000;
+    if (fetchError) throw fetchError;
 
-      while (true) {
-        const { data, error } = await bucket.list(prefix, {
-          limit,
-          offset,
-          sortBy: { column: "name", order: "asc" },
-        });
+    const resolvedReportsList = resolvedReports ?? [];
 
-        if (error) throw error;
-
-        const items = (data ?? []) as StorageItem[];
-        if (items.length === 0) break;
-
-        for (const item of items) {
-          const isFolder = item.metadata == null;
-          const nextPrefix = prefix ? `${prefix}/${item.name}` : item.name;
-
-          if (isFolder) {
-            const nested = await collectPaths(nextPrefix);
-            paths.push(...nested);
-          } else {
-            paths.push(nextPrefix);
-          }
+    // Collect image paths to delete from storage
+    const imagePaths: string[] = [];
+    for (const report of resolvedReportsList) {
+      if (report.image_url) {
+        // Extract file path from public URL
+        const urlParts = report.image_url.split("/issue-images/");
+        if (urlParts.length > 1) {
+          imagePaths.push(urlParts[1]);
         }
-
-        if (items.length < limit) break;
-        offset += items.length;
       }
+      if (report.completion_image_url) {
+        const urlParts = report.completion_image_url.split("/issue-images/");
+        if (urlParts.length > 1) {
+          imagePaths.push(urlParts[1]);
+        }
+      }
+    }
 
-      return paths;
-    };
-
-    const allPaths = await collectPaths("");
-
-    // Delete in chunks to avoid request size limits
+    // Delete images from storage (in chunks)
+    const bucket = admin.storage.from("issue-images");
     let deletedFiles = 0;
-    for (let i = 0; i < allPaths.length; i += 1000) {
-      const chunk = allPaths.slice(i, i + 1000);
-      const { error } = await bucket.remove(chunk);
-      if (error) throw error;
-      deletedFiles += chunk.length;
+    if (imagePaths.length > 0) {
+      for (let i = 0; i < imagePaths.length; i += 100) {
+        const chunk = imagePaths.slice(i, i + 100);
+        const { error } = await bucket.remove(chunk);
+        if (error) console.warn("Storage delete error:", error.message);
+        else deletedFiles += chunk.length;
+      }
     }
 
-    // Count reports (for UI feedback)
-    const { count: reportCount, error: reportCountError } = await admin
-      .from("reports")
-      .select("id", { count: "exact", head: true });
+    // Delete resolved reports from DB
+    const resolvedIds = resolvedReportsList.map((r) => r.id);
+    let deletedReports = 0;
+    if (resolvedIds.length > 0) {
+      const { count, error: deleteError } = await admin
+        .from("reports")
+        .delete({ count: "exact" })
+        .in("id", resolvedIds);
 
-    if (reportCountError) {
-      // Don't fail the whole operation; just skip the count.
-      console.warn("Unable to count reports:", reportCountError);
+      if (deleteError) throw deleteError;
+      deletedReports = count ?? resolvedIds.length;
     }
 
-    // Delete all reports
-    const { error: reportsError } = await admin
-      .from("reports")
-      .delete()
-      .neq("id", "00000000-0000-0000-0000-000000000000");
-
-    if (reportsError) throw reportsError;
-
-    return json(200, { deletedFiles, deletedReports: reportCount ?? 0 });
+    return json(200, { deletedFiles, deletedReports });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Unknown error";
     return json(500, { error: msg });
