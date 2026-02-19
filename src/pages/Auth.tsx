@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { z } from 'zod';
-import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User, LayoutDashboard, Command, FileText, Hash, GraduationCap, Briefcase, KeyRound, ArrowLeft, CheckCircle2, Sparkles } from 'lucide-react';
+import { Shield, Eye, EyeOff, AlertTriangle, Mail, Lock, User, LayoutDashboard, Command, FileText, Hash, GraduationCap, Briefcase, KeyRound, ArrowLeft, CheckCircle2, Sparkles, Wrench } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useTheme } from '@/contexts/ThemeContext';
 import { ThemeToggle } from '@/components/ThemeToggle';
