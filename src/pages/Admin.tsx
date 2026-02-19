@@ -195,42 +195,6 @@ export default function Admin() {
     fetchUsers();
     setProcessingRequest(null);
   };
-        .update({ role: 'official' })
-        .eq('user_id', userId)
-        .select('id');
-
-      let roleError = updateRoleError;
-
-      if (!roleError && (!updatedRoles || updatedRoles.length === 0)) {
-        const { error } = await supabase
-          .from('user_roles')
-          .insert({ user_id: userId, role: 'official' });
-        roleError = error;
-      }
-
-      if (roleError) {
-        toast({
-          title: 'Error',
-          description: 'Failed to update user role.',
-          variant: 'destructive',
-        });
-      } else {
-        toast({
-          title: 'Request Approved',
-          description: 'User has been granted official access.',
-        });
-        fetchUsers();
-      }
-    } else {
-      toast({
-        title: 'Request Rejected',
-        description: 'The access request has been rejected.',
-      });
-    }
-
-    fetchAccessRequests();
-    setProcessingRequest(null);
-  };
 
   const pendingRequests = accessRequests.filter(r => r.status === 'pending');
   const processedRequests = accessRequests.filter(r => r.status !== 'pending');
