@@ -754,8 +754,8 @@ export default function CommandCenter() {
       void checkStorageUsage();
 
       toast({
-        title: 'All Reports & Storage Cleared',
-        description: `Deleted ${deletedFiles} images and ${deletedReports} reports.`,
+        title: '✅ Resolved Reports Cleared',
+        description: `Deleted ${deletedFiles} images and ${deletedReports} resolved reports. Active reports remain.`,
       });
     } catch (error) {
       console.error('Clear storage error:', error);
