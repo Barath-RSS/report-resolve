@@ -105,7 +105,7 @@ export default function Admin() {
     setLoading(false);
   };
 
-  const updateUserRole = async (userId: string, newRole: 'student' | 'official') => {
+  const updateUserRole = async (userId: string, newRole: 'student' | 'official' | 'staff') => {
     setUpdating(userId);
 
     const { error } = await supabase

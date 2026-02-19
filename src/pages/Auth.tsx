@@ -502,7 +502,7 @@ export default function AuthPage() {
               Request Submitted!
             </h1>
             <p className="text-muted-foreground mb-8">
-              Your request for official access has been submitted successfully. 
+              Your request for {userType === 'staff' ? 'service staff' : 'official'} access has been submitted successfully. 
               An administrator will review and approve your request. 
               You will be able to log in once your access is approved.
             </p>
