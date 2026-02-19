@@ -29,7 +29,7 @@ const studentEmailSchema = z.string().email('Invalid email format').refine(
   { message: 'Students should use personal email (not @sathyabama.ac.in)' }
 );
 
-type UserType = 'student' | 'official';
+type UserType = 'student' | 'official' | 'staff';
 type ResetStep = 'email' | 'otp' | 'newPassword' | 'success';
 
 export default function AuthPage() {
