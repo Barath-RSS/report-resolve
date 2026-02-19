@@ -66,6 +66,11 @@ export default function AuthPage() {
       return;
     }
 
+    if (role === 'staff') {
+      navigate('/staff-dashboard');
+      return;
+    }
+
     if (role === 'student') {
       if (userType === 'student') {
         navigate('/dashboard');
