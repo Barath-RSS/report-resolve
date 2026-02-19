@@ -11,13 +11,17 @@ import { SplashScreen } from "./components/SplashScreen";
 import Auth from "./pages/Auth";
 import StudentDashboard from "./pages/StudentDashboard";
 import CommandCenter from "./pages/CommandCenter";
+import StaffDashboard from "./pages/StaffDashboard";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
 
-function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; allowedRole?: 'student' | 'official' }) {
+type AppRole = 'student' | 'official' | 'staff' | null;
+
+function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; allowedRole?: AppRole }) {
   const { user, role, loading } = useAuth();
+  const typedRole = role as AppRole;
 
   if (loading) {
     return (
@@ -31,8 +35,10 @@ function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; 
     return <Navigate to="/auth" replace />;
   }
 
-  if (allowedRole && role !== allowedRole) {
-    return <Navigate to={role === 'official' ? '/command-center' : '/dashboard'} replace />;
+  if (allowedRole && typedRole !== allowedRole) {
+    if (typedRole === 'official') return <Navigate to="/command-center" replace />;
+    if (typedRole === 'staff') return <Navigate to="/staff-dashboard" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;
@@ -40,6 +46,7 @@ function ProtectedRoute({ children, allowedRole }: { children: React.ReactNode; 
 
 function RedirectByRole() {
   const { user, role, loading } = useAuth();
+  const typedRole = role as AppRole;
 
   if (loading) {
     return (
@@ -49,12 +56,12 @@ function RedirectByRole() {
     );
   }
 
-  // If logged in, redirect to appropriate dashboard
-  if (user && role) {
-    return <Navigate to={role === 'official' ? '/command-center' : '/dashboard'} replace />;
+  if (user && typedRole) {
+    if (typedRole === 'official') return <Navigate to="/command-center" replace />;
+    if (typedRole === 'staff') return <Navigate to="/staff-dashboard" replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
-  // Otherwise redirect to auth
   return <Navigate to="/auth" replace />;
 }
 
@@ -77,6 +84,14 @@ function AppRoutes() {
           element={
             <ProtectedRoute allowedRole="official">
               <CommandCenter />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/staff-dashboard"
+          element={
+            <ProtectedRoute allowedRole="staff">
+              <StaffDashboard />
             </ProtectedRoute>
           }
         />
