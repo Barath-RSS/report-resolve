@@ -309,27 +309,55 @@ export default function AuthPage() {
               await supabase.auth.signOut();
               
               if (accessRequest?.status === 'pending') {
-                throw new Error('Your official access request is still pending approval. Please wait for an administrator to approve your request.');
+                throw new Error('Your official access request is still pending approval.');
               } else if (accessRequest?.status === 'rejected') {
                 throw new Error('Your official access request was rejected. Please contact an administrator.');
-              } else if (accessRequest?.status === 'approved') {
-                throw new Error('Your request was approved, but your official role is not active yet. Please try again in a minute.');
               } else {
                 throw new Error('You do not have official access. Please request official access first by signing up as an official.');
               }
             }
             
-            toast({
-              title: '🎉 Welcome back!',
-              description: 'Signing you in to Command Center...',
-            });
+            toast({ title: '🎉 Welcome back!', description: 'Signing you in to Command Center...' });
+            return;
+          }
+        } else if (userType === 'staff') {
+          await new Promise(resolve => setTimeout(resolve, 300));
+          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          if (currentUser) {
+            // Check if user has staff role
+            const { data: staffRows } = await supabase
+              .from('user_roles')
+              .select('role')
+              .eq('user_id', currentUser.id)
+              .eq('role', 'staff' as any);
+            
+            const isStaff = staffRows && staffRows.length > 0;
+
+            if (!isStaff) {
+              const { data: accessRequest } = await supabase
+                .from('access_requests')
+                .select('status')
+                .eq('user_id', currentUser.id)
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
+              
+              await supabase.auth.signOut();
+              
+              if (accessRequest?.status === 'pending') {
+                throw new Error('Your staff access request is still pending admin approval.');
+              } else if (accessRequest?.status === 'rejected') {
+                throw new Error('Your staff access request was rejected. Please contact an administrator.');
+              } else {
+                throw new Error('You do not have staff access. Please sign up as Service Staff first.');
+              }
+            }
+            
+            toast({ title: '🎉 Welcome back!', description: 'Signing you in to Staff Portal...' });
             return;
           }
         } else {
-          toast({
-            title: '🎉 Welcome back!',
-            description: 'Signing you in...',
-          });
+          toast({ title: '🎉 Welcome back!', description: 'Signing you in...' });
         }
       } else {
         const formattedRegisterNo = userType === 'student' ? registerNo.trim().toUpperCase() : null;
