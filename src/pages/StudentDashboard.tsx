@@ -427,6 +427,23 @@ export default function StudentDashboard() {
                           <p className="text-sm text-foreground mt-1">{report.official_response}</p>
                         </div>
                       )}
+                      {/* Completion photo - shown when work is done */}
+                      {report.completion_image_url && (
+                        <div className="mt-4 rounded-xl overflow-hidden border-2 border-success/30 bg-success/5">
+                          <div className="flex items-center gap-2 px-3 py-2 border-b border-success/20">
+                            <CheckCircle2 className="w-4 h-4 text-success" />
+                            <p className="text-sm font-medium text-success">Work Completed — Verification Photo</p>
+                          </div>
+                          <img
+                            src={report.completion_image_url}
+                            alt="Completion proof"
+                            className="w-full h-44 object-cover"
+                          />
+                          <p className="text-xs text-muted-foreground px-3 py-2">
+                            📸 Photo uploaded by service staff as proof of work completion
+                          </p>
+                        </div>
+                      )}
                       <p className="mt-3 text-xs text-muted-foreground">
                         Reported on {new Date(report.created_at).toLocaleDateString()}
                       </p>
