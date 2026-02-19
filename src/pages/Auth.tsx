@@ -60,24 +60,24 @@ export default function AuthPage() {
 
   useEffect(() => {
     if (authLoading) return;
-    if (!user || !role) return;
+    if (!user || !typedRole) return;
 
-    if (role === 'official') {
+    if (typedRole === 'official') {
       navigate('/command-center');
       return;
     }
 
-    if (role === 'staff') {
+    if (typedRole === 'staff') {
       navigate('/staff-dashboard');
       return;
     }
 
-    if (role === 'student') {
+    if (typedRole === 'student') {
       if (userType === 'student') {
         navigate('/dashboard');
       }
     }
-  }, [user, role, authLoading, navigate, userType]);
+  }, [user, typedRole, authLoading, navigate, userType]);
 
   // Reset form when switching user type or auth mode
   useEffect(() => {
