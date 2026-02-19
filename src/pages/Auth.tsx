@@ -828,7 +828,9 @@ export default function AuthPage() {
               exit={{ opacity: 0, y: 10 }}
               className={`flex items-center gap-3 p-4 rounded-xl border-2 mb-6 ${
                 userType === 'official' 
-                  ? 'bg-gradient-to-r from-primary/10 to-primary/5 border-primary/30' 
+                  ? 'bg-gradient-to-r from-primary/10 to-primary/5 border-primary/30'
+                  : userType === 'staff'
+                  ? 'bg-gradient-to-r from-warning/10 to-warning/5 border-warning/30'
                   : 'bg-gradient-to-r from-muted/50 to-muted/30 border-border'
               }`}
             >
@@ -841,6 +843,18 @@ export default function AuthPage() {
                     <p className="text-sm font-semibold text-foreground">Command Center</p>
                     <p className="text-xs text-muted-foreground truncate">
                       {isLogin ? 'Login with @sathyabama.ac.in email' : 'Use official email to register'}
+                    </p>
+                  </div>
+                </>
+              ) : userType === 'staff' ? (
+                <>
+                  <div className="w-10 h-10 rounded-lg bg-warning/20 flex items-center justify-center flex-shrink-0">
+                    <Wrench className="w-5 h-5 text-warning" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">Service Staff Portal</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {isLogin ? 'Login with your personal email' : 'Request staff access (admin approval required)'}
                     </p>
                   </div>
                 </>
