@@ -153,11 +153,48 @@ export default function Admin() {
       return;
     }
 
-    // If approved, update the user's role to official (use upsert in case the row doesn't exist)
+    // If approved, update the user's role (detect if staff or official from request reason)
     if (action === 'approved') {
-      // Update first (handles duplicates safely); if nothing updated, insert.
+      const approvedRequest = accessRequests.find(r => r.id === requestId);
+      const isStaffRequest = approvedRequest?.reason?.startsWith('[Service Staff]');
+      const newRole = isStaffRequest ? 'staff' : 'official';
+
       const { data: updatedRoles, error: updateRoleError } = await supabase
         .from('user_roles')
+        .update({ role: newRole as any })
+        .eq('user_id', userId)
+        .select('id');
+
+      if (updateRoleError) {
+        toast({ title: 'Error', description: 'Failed to process the request.', variant: 'destructive' });
+        setProcessingRequest(null);
+        return;
+      }
+
+      if (!updatedRoles || updatedRoles.length === 0) {
+        const { error: insertError } = await supabase
+          .from('user_roles')
+          .insert({ user_id: userId, role: newRole as any });
+
+        if (insertError) {
+          toast({ title: 'Error', description: 'Failed to process the request.', variant: 'destructive' });
+          setProcessingRequest(null);
+          return;
+        }
+      }
+
+      toast({
+        title: 'Request Approved',
+        description: `User has been granted ${isStaffRequest ? 'service staff' : 'official'} access.`,
+      });
+    } else {
+      toast({ title: 'Request Rejected', description: 'The access request has been rejected.' });
+    }
+
+    fetchAccessRequests();
+    fetchUsers();
+    setProcessingRequest(null);
+  };
         .update({ role: 'official' })
         .eq('user_id', userId)
         .select('id');
