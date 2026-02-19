@@ -53,8 +53,9 @@ export default function AuthPage() {
   const [officialRequestSubmitted, setOfficialRequestSubmitted] = useState(false);
 
   const { signIn, signUp, user, role, loading: authLoading } = useAuth();
-  const { theme } = useTheme();
   const navigate = useNavigate();
+  // cast role to include staff for type narrowing
+  const typedRole = role as 'student' | 'official' | 'staff' | null;
   const { toast } = useToast();
 
   useEffect(() => {
