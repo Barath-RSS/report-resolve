@@ -932,7 +932,7 @@ export default function AuthPage() {
             )}
 
             {/* Email Field */}
-            {(userType === 'official' || !isLogin) && (
+            {(userType === 'official' || userType === 'staff' || !isLogin) && (
               <div className="space-y-2">
                 <Label htmlFor="email" className="text-sm font-medium">
                   {userType === 'official' ? 'Official Email' : 'Email'}
