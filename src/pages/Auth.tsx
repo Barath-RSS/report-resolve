@@ -386,14 +386,16 @@ export default function AuthPage() {
           throw error;
         }
         
-        if (userType === 'official' && data?.user) {
+        if ((userType === 'official' || userType === 'staff') && data?.user) {
           const { error: requestError } = await supabase
             .from('access_requests')
             .insert({
               user_id: data.user.id,
               full_name: fullName,
               email: email,
-              reason: accessRequestReason || 'Official access request',
+              reason: userType === 'staff' 
+                ? `[Service Staff] ${accessRequestReason || 'Service staff access request'}`
+                : accessRequestReason || 'Official access request',
               status: 'pending'
             });
           
