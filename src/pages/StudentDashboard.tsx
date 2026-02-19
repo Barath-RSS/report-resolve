@@ -58,6 +58,7 @@ interface Report {
   status: string;
   is_anonymous: boolean;
   official_response?: string;
+  completion_image_url?: string | null;
 }
 
 export default function StudentDashboard() {
