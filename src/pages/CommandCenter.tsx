@@ -748,10 +748,8 @@ export default function CommandCenter() {
       const deletedFiles = Number(data?.deletedFiles ?? 0);
       const deletedReports = Number(data?.deletedReports ?? 0);
 
-      // Refresh reports list and storage info
-      setReports([]);
-      setFilteredReports([]);
-      setStorageInfo({ used: 0, fileCount: 0 });
+      // Remove only resolved reports from local state
+      setReports(prev => prev.filter(r => r.status !== 'resolved'));
       void checkStorageUsage();
 
       toast({
