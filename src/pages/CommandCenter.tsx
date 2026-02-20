@@ -406,9 +406,9 @@ export default function CommandCenter() {
       doc.setTextColor(0, 0, 0);
       let yPosition = 32;
       
-      // Two-column layout for reports without images
-      const reportsWithImages = reports.filter(r => r.image_url);
-      const reportsWithoutImages = reports.filter(r => !r.image_url);
+      // Separate reports by whether they have any images
+      const reportsWithImages = reports.filter(r => r.image_url || r.completion_image_url);
+      const reportsWithoutImages = reports.filter(r => !r.image_url && !r.completion_image_url);
       
       // Helper to safely get text (no null/undefined)
       const safeText = (val: string | null | undefined, fallback: string = 'N/A'): string => {
