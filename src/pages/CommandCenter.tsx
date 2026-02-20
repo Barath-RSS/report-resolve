@@ -46,6 +46,7 @@ interface Report {
   sub_category: string;
   description: string;
   image_url: string | null;
+  completion_image_url: string | null;
   lat: number | null;
   lng: number | null;
   landmark: string | null;
@@ -405,9 +406,9 @@ export default function CommandCenter() {
       doc.setTextColor(0, 0, 0);
       let yPosition = 32;
       
-      // Two-column layout for reports without images
-      const reportsWithImages = reports.filter(r => r.image_url);
-      const reportsWithoutImages = reports.filter(r => !r.image_url);
+      // Separate reports by whether they have any images
+      const reportsWithImages = reports.filter(r => r.image_url || r.completion_image_url);
+      const reportsWithoutImages = reports.filter(r => !r.image_url && !r.completion_image_url);
       
       // Helper to safely get text (no null/undefined)
       const safeText = (val: string | null | undefined, fallback: string = 'N/A'): string => {
@@ -585,20 +586,22 @@ export default function CommandCenter() {
         doc.setFontSize(8);
         doc.setFont('helvetica', 'bold');
         doc.setTextColor(80, 80, 80);
-        doc.text(`📷 REPORTS WITH ATTACHMENTS (${reportsWithImages.length})`, margin + 3, yPosition + 5);
+        doc.text(`REPORTS WITH ATTACHMENTS (${reportsWithImages.length})`, margin + 3, yPosition + 5);
         yPosition += 12;
         
         for (const report of reportsWithImages) {
           const originalIndex = reports.indexOf(report);
+          const hasReportImg = !!report.image_url;
+          const hasCompletionImg = !!report.completion_image_url;
+          const bothImages = hasReportImg && hasCompletionImg;
           
           if (yPosition > pageHeight - 70) {
             doc.addPage();
             yPosition = 15;
           }
           
-          // Draw report info on left, image on right
-          const infoWidth = contentWidth * 0.55;
-          const imgWidth = contentWidth * 0.4;
+          // Draw report info on left
+          const infoWidth = contentWidth * 0.5;
           const startY = yPosition;
           
           // Report info card
@@ -634,14 +637,12 @@ export default function CommandCenter() {
           doc.setTextColor(80, 80, 80);
           doc.setFontSize(7);
           
-          // Submitted By
           doc.setFont('helvetica', 'bold');
           doc.text('Submitted By:', leftPad, infoY);
           doc.setFont('helvetica', 'normal');
           doc.text(getSubmitterName(report).substring(0, 30), leftPad + 22, infoY);
           infoY += 5;
           
-          // Date & Time
           doc.setFont('helvetica', 'bold');
           doc.text('Date:', leftPad, infoY);
           doc.setFont('helvetica', 'normal');
@@ -652,7 +653,6 @@ export default function CommandCenter() {
           doc.text(formatTime(report.created_at), leftPad + 50, infoY);
           infoY += 5;
           
-          // Category
           doc.setFont('helvetica', 'bold');
           doc.text('Category:', leftPad, infoY);
           doc.setFont('helvetica', 'normal');
@@ -660,14 +660,12 @@ export default function CommandCenter() {
           doc.text(catImg.charAt(0).toUpperCase() + catImg.slice(1), leftPad + 16, infoY);
           infoY += 5;
           
-          // Location
           doc.setFont('helvetica', 'bold');
           doc.text('Location:', leftPad, infoY);
           doc.setFont('helvetica', 'normal');
           doc.text(safeText(report.landmark, 'Not specified').substring(0, 35), leftPad + 15, infoY);
           infoY += 5;
           
-          // Description
           doc.setFont('helvetica', 'bold');
           doc.text('Description:', leftPad, infoY);
           infoY += 4;
@@ -678,24 +676,78 @@ export default function CommandCenter() {
           const descLines = doc.splitTextToSize(descImg.substring(0, 180), infoWidth - 12);
           doc.text(descLines.slice(0, 3), leftPad, infoY);
           
-          // Image on right
-          try {
-            const response = await fetch(report.image_url!);
-            const blob = await response.blob();
-            const base64 = await new Promise<string>((resolve) => {
-              const reader = new FileReader();
-              reader.onloadend = () => resolve(reader.result as string);
-              reader.readAsDataURL(blob);
-            });
+          // Images on the right side
+          const imgAreaX = margin + infoWidth + 3;
+          const imgAreaWidth = contentWidth - infoWidth - 3;
+          
+          const loadImage = async (url: string): Promise<string | null> => {
+            try {
+              const resp = await fetch(url);
+              const blob = await resp.blob();
+              return await new Promise<string>((resolve) => {
+                const reader = new FileReader();
+                reader.onloadend = () => resolve(reader.result as string);
+                reader.readAsDataURL(blob);
+              });
+            } catch { return null; }
+          };
+          
+          if (bothImages) {
+            // Two images stacked: report image on top, completion below
+            const singleImgH = 24;
             
-            doc.addImage(base64, 'JPEG', margin + infoWidth + 4, startY, imgWidth, 50);
-          } catch (imgError) {
-            console.error('Failed to load image:', imgError);
-            doc.setFillColor(230, 230, 230);
-            doc.roundedRect(margin + infoWidth + 4, startY, imgWidth, 50, 2, 2, 'F');
-            doc.setFontSize(8);
-            doc.setTextColor(150, 150, 150);
-            doc.text('Image unavailable', margin + infoWidth + imgWidth / 2 + 4, startY + 25, { align: 'center' });
+            // Report image label + image
+            doc.setFontSize(6);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(100, 100, 100);
+            doc.text('REPORT IMAGE', imgAreaX, startY + 4);
+            const reportImgData = await loadImage(report.image_url!);
+            if (reportImgData) {
+              doc.addImage(reportImgData, 'JPEG', imgAreaX, startY + 5, imgAreaWidth, singleImgH);
+            } else {
+              doc.setFillColor(230, 230, 230);
+              doc.roundedRect(imgAreaX, startY + 5, imgAreaWidth, singleImgH, 1, 1, 'F');
+              doc.setFontSize(7);
+              doc.setTextColor(150, 150, 150);
+              doc.text('Image unavailable', imgAreaX + imgAreaWidth / 2, startY + 5 + singleImgH / 2, { align: 'center' });
+            }
+            
+            // Completion image label + image
+            doc.setFontSize(6);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(34, 150, 34);
+            doc.text('COMPLETION PHOTO', imgAreaX, startY + singleImgH + 9);
+            const compImgData = await loadImage(report.completion_image_url!);
+            if (compImgData) {
+              doc.addImage(compImgData, 'JPEG', imgAreaX, startY + singleImgH + 10, imgAreaWidth, singleImgH);
+            } else {
+              doc.setFillColor(230, 245, 230);
+              doc.roundedRect(imgAreaX, startY + singleImgH + 10, imgAreaWidth, singleImgH, 1, 1, 'F');
+              doc.setFontSize(7);
+              doc.setTextColor(150, 150, 150);
+              doc.text('Image unavailable', imgAreaX + imgAreaWidth / 2, startY + singleImgH + 10 + singleImgH / 2, { align: 'center' });
+            }
+          } else {
+            // Single image (report or completion)
+            const imgUrl = report.image_url || report.completion_image_url!;
+            const label = report.image_url ? 'REPORT IMAGE' : 'COMPLETION PHOTO';
+            const labelColor: [number, number, number] = report.image_url ? [100, 100, 100] : [34, 150, 34];
+            
+            doc.setFontSize(6);
+            doc.setFont('helvetica', 'bold');
+            doc.setTextColor(...labelColor);
+            doc.text(label, imgAreaX, startY + 4);
+            
+            const imgData = await loadImage(imgUrl);
+            if (imgData) {
+              doc.addImage(imgData, 'JPEG', imgAreaX, startY + 5, imgAreaWidth, 50);
+            } else {
+              doc.setFillColor(230, 230, 230);
+              doc.roundedRect(imgAreaX, startY + 5, imgAreaWidth, 50, 2, 2, 'F');
+              doc.setFontSize(8);
+              doc.setTextColor(150, 150, 150);
+              doc.text('Image unavailable', imgAreaX + imgAreaWidth / 2, startY + 30, { align: 'center' });
+            }
           }
           
           yPosition = startY + cardHeight + 5;
@@ -747,10 +799,8 @@ export default function CommandCenter() {
       const deletedFiles = Number(data?.deletedFiles ?? 0);
       const deletedReports = Number(data?.deletedReports ?? 0);
 
-      // Refresh reports list and storage info
-      setReports([]);
-      setFilteredReports([]);
-      setStorageInfo({ used: 0, fileCount: 0 });
+      // Remove only resolved reports from local state
+      setReports(prev => prev.filter(r => r.status !== 'resolved'));
       void checkStorageUsage();
 
       toast({
