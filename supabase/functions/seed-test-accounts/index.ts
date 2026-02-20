@@ -49,6 +49,13 @@ serve(async (req) => {
         role: "student" as const,
         registerNo: "41110000",
       },
+      {
+        email: "teststaff@sathyabama.ac.in",
+        password: "Staff@123",
+        fullName: "Test Staff",
+        role: "staff" as const,
+        registerNo: null,
+      },
     ];
 
     const createdAccounts = [];
