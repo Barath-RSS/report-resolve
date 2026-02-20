@@ -80,11 +80,11 @@ serve(async (req) => {
       if (userData.user) {
         // The handle_new_user trigger should create profile and student role
         // For official, we need to update the role
-        if (account.role === "official") {
-          // Update user_roles to official
+        if (account.role !== "student") {
+          // Update user_roles to the correct role
           const { error: roleError } = await admin
             .from("user_roles")
-            .update({ role: "official" })
+            .update({ role: account.role })
             .eq("user_id", userData.user.id);
 
           if (roleError) {
