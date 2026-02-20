@@ -46,6 +46,7 @@ interface Report {
   sub_category: string;
   description: string;
   image_url: string | null;
+  completion_image_url: string | null;
   lat: number | null;
   lng: number | null;
   landmark: string | null;
